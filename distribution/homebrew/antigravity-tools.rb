@@ -2,7 +2,7 @@ cask "antigravity-tools" do
   version "3.2.0"
   sha256 :no_check
 
-  url "https://github.com/lbjlaq/Antigravity-Manager/releases/download/v#{version}/Antigravity_Tools_#{version}_x64.dmg"
+  url "https://github.com/lbjlaq/Antigravity-Manager/releases/download/v#{version}/Antigravity_Tools_#{version}_universal.dmg"
   name "Antigravity Tools"
   desc "Professional Account Management for AI Services"
   homepage "https://github.com/lbjlaq/Antigravity-Manager"
