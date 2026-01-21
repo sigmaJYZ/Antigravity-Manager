@@ -59,7 +59,13 @@ pub async fn handle_generate(
             flattened
         });
 
-        let config = crate::proxy::mappers::common_utils::resolve_request_config(&model_name, &mapped_model, &tools_val);
+        let config = crate::proxy::mappers::common_utils::resolve_request_config(
+            &model_name, 
+            &mapped_model, 
+            &tools_val,
+            None,  // size (not applicable for Gemini native protocol)
+            None   // quality
+        );
 
         // 4. 获取 Token (使用准确的 request_type)
         // 提取 SessionId (粘性指纹)

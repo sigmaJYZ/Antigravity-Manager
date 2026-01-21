@@ -52,7 +52,7 @@ pub fn wrap_request(body: &Value, project_id: &str, mapped_model: &str, session_
     });
 
     // Use shared grounding/config logic
-    let config = crate::proxy::mappers::common_utils::resolve_request_config(original_model, final_model_name, &tools_val);
+    let config = crate::proxy::mappers::common_utils::resolve_request_config(original_model, final_model_name, &tools_val, None, None);
     
     // Clean tool declarations (remove forbidden Schema fields like multipleOf, and remove redundant search decls)
     if let Some(tools) = inner_request.get_mut("tools") {

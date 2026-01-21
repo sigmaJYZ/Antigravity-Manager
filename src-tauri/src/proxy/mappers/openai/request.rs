@@ -12,7 +12,13 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
     let mapped_model_lower = mapped_model.to_lowercase();
     
     // Resolve grounding config
-    let config = crate::proxy::mappers::common_utils::resolve_request_config(&request.model, &mapped_model_lower, &tools_val);
+    let config = crate::proxy::mappers::common_utils::resolve_request_config(
+        &request.model, 
+        &mapped_model_lower, 
+        &tools_val,
+        request.size.as_deref(),      // [NEW] Pass size parameter
+        request.quality.as_deref()    // [NEW] Pass quality parameter
+    );
 
     // 检测 Gemini 3 Pro thinking 模型
     let is_gemini_3_thinking = mapped_model_lower.contains("gemini-3") && 
@@ -545,6 +551,8 @@ mod tests {
             instructions: None,
             input: None,
             prompt: None,
+            size: None,
+            quality: None,
         };
 
         let result = transform_openai_request(&req, "test-v", "gemini-1.5-flash");

@@ -24,7 +24,9 @@ pub async fn handle_detect_model(
     let config = crate::proxy::mappers::common_utils::resolve_request_config(
         model_name,
         &mapped_model,
-        &None // We don't check tools for static capability detection
+        &None, // We don't check tools for static capability detection
+        None,  // size
+        None   // quality
     );
 
     // 3. Construct response

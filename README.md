@@ -263,7 +263,36 @@ with open("output.png", "wb") as f:
 - **`n`**: 生成图片数量（1-10）
 - **`response_format`**: `"b64_json"` 或 `"url"`（Data URI）
 
-#### 方式二：Chat 接口 + 模型后缀
+#### 方式二：Chat API + 参数设置 (✨ 新增)
+
+**所有协议**（OpenAI、Claude）的 Chat API 现在都支持直接传递 `size` 和 `quality` 参数：
+
+```python
+# OpenAI Chat API
+response = client.chat.completions.create(
+    model="gemini-3-pro-image",
+    size="1920x1080",      # ✅ 支持任意 WIDTHxHEIGHT 格式
+    quality="hd",          # ✅ "standard" | "hd" | "medium"
+    messages=[{"role": "user", "content": "一座未来主义风格的城市"}]
+)
+```
+
+```bash
+# Claude Messages API
+curl -X POST http://127.0.0.1:8045/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: sk-antigravity" \
+  -d '{
+    "model": "gemini-3-pro-image",
+    "size": "1280x720",
+    "quality": "hd",
+    "messages": [{"role": "user", "content": "一只可爱的猫咪"}]
+  }'
+```
+
+**参数优先级**: 请求体参数 > 模型后缀
+
+#### 方式三：Chat 接口 + 模型后缀
 ```python
 response = client.chat.completions.create(
     model="gemini-3-pro-image-16-9-4k",  # 格式：gemini-3-pro-image-[比例]-[质量]
@@ -276,6 +305,21 @@ response = client.chat.completions.create(
 - **质量**: `-4k` (4K), `-2k` (2K), 不加后缀（标准）
 - **示例**: `gemini-3-pro-image-16-9-4k` → 16:9 比例 + 4K 分辨率
 
+#### 方式四：Cherry Studio 等客户端设置
+在支持 OpenAI 协议的客户端（如 Cherry Studio）中，可以通过**模型设置**页面配置图片生成参数：
+
+1. **进入模型设置**：选择 `gemini-3-pro-image` 模型
+2. **配置参数**：
+   - **Size (尺寸)**: 输入任意 `WIDTHxHEIGHT` 格式（如 `1920x1080`, `1024x1024`）
+   - **Quality (质量)**: 选择 `standard` / `hd` / `medium`
+   - **Number (数量)**: 设置生成图片数量（1-10）
+3. **发送请求**：直接在对话框中输入图片描述即可
+
+**参数映射规则**：
+- `size: "1920x1080"` → 自动计算为 `16:9` 宽高比
+- `quality: "hd"` → 映射为 `4K` 分辨率
+- `quality: "medium"` → 映射为 `2K` 分辨率
+
 
 ## 📝 开发者与社区
 
@@ -283,19 +327,40 @@ response = client.chat.completions.create(
     *   **v3.3.47 (2026-01-21)**:
         -   **[核心修复] 图片生成 API 参数映射增强 (Fix Issue #911)**:
             -   **问题背景**: `/v1/images/generations` 端点存在两个参数映射缺陷:
-                - `size` 参数只支持硬编码的特定尺寸字符串,OpenAI 标准尺寸(如 `1280x720`)会被错误地回退到 `1:1` 比例
-                - `quality` 参数仅用于 Prompt 增强,未映射到 Gemini 的 `imageSize`,无法控制输出图片的物理分辨率
-            -   **修复内容**:
-                - **扩展 `common_utils.rs`**: 新增 `parse_image_config_with_params` 函数,支持从 OpenAI 参数(`size`, `quality`)解析图片配置
-                - **动态宽高比计算**: 新增 `calculate_aspect_ratio_from_size` 函数,使用数学计算替代硬编码匹配,支持任意 `WIDTHxHEIGHT` 格式
-                - **统一配置解析**: 修改 `handle_images_generations` 函数,删除硬编码映射,调用统一的配置解析函数
+                - `size` 参数只支持硬编码特定尺寸字符串；OpenAI 标准尺寸（如 `1280x720`）会错误回退到 `1:1` 宽高比
+                - `quality` 参数仅用于 Prompt 增强，未映射到 Gemini 的 `imageSize`，无法控制输出图片的物理分辨率
+            -   **修复详情**:
+                - **扩展 `common_utils.rs`**: 添加 `parse_image_config_with_params` 函数，支持从 OpenAI 参数 (`size`, `quality`) 解析图片配置
+                - **动态宽高比计算**: 添加 `calculate_aspect_ratio_from_size` 函数，使用数学计算代替硬编码匹配，支持任意 `WIDTHxHEIGHT` 格式
+                - **统一配置解析**: 修改 `handle_images_generations` 函数，移除硬编码映射，调用统一配置解析函数
                 - **参数映射**: `quality: "hd"` → `imageSize: "4K"`, `quality: "medium"` → `imageSize: "2K"`
-            -   **测试验证**: 新增 8 个单元测试,覆盖 OpenAI 参数解析、动态计算、向后兼容等场景,全部通过
+            -   **测试验证**: 添加 8 个单元测试覆盖 OpenAI 参数解析、动态计算、向后兼容场景，全部通过
             -   **兼容性保证**:
-                - ✅ 向后兼容: Chat 路径(如 `gemini-3-pro-image-16-9-4k`)仍正常工作
-                - ✅ 渐进增强: 支持更多 OpenAI 标准尺寸,`quality` 参数正确映射
-                - ✅ 无破坏性变更: Claude、Vertex、Gemini 协议不受影响
-            -   **影响范围**: 解决了 OpenAI Images API 的参数映射问题,所有协议通过 `common_utils` 自动获得改进
+                - ✅ 向后兼容：Chat 路径（如 `gemini-3-pro-image-16-9-4k`）仍正常工作
+                - ✅ 渐进增强：支持更多 OpenAI 标准尺寸，`quality` 参数正确映射
+                - ✅ 无破坏性变更：Claude、Vertex、Gemini 协议不受影响
+            -   **影响**: 解决了 OpenAI Images API 参数映射问题，所有协议通过 `common_utils` 自动受益
+        -   **[Feature] 多协议图片生成参数支持 (Multi-Protocol Image Generation Parameters)**:
+            -   **背景**: 之前只有 Images API 支持 `size` 和 `quality` 参数，Chat API 和 Claude API 无法使用
+            -   **修复内容**:
+                - **扩展请求结构体**: 为 `OpenAIRequest` 和 `ClaudeRequest` 添加 `size` 和 `quality` 字段
+                - **统一参数解析**: 修改 `resolve_request_config` 函数签名，支持从请求体参数解析图片配置
+                - **多协议支持**: OpenAI Chat API (`/v1/chat/completions`) 和 Claude Messages API (`/v1/messages`) 现在都支持直接传递图片生成参数
+            -   **使用示例**:
+                ```python
+                # OpenAI Chat API
+                response = client.chat.completions.create(
+                    model="gemini-3-pro-image",
+                    size="1920x1080",  # ✅ 支持任意 WIDTHxHEIGHT 格式
+                    quality="hd",      # ✅ "standard" | "hd" | "medium"
+                    messages=[{"role": "user", "content": "一座未来主义城市"}]
+                )
+                ```
+            -   **兼容性保证**:
+                - ✅ 向后兼容：所有现有功能保持不变
+                - ✅ 参数优先级：请求体参数 > 模型后缀
+                - ✅ 无破坏性变更：Images API 继续正常工作
+            -   **影响**: 所有协议（OpenAI、Claude）现在都能通过参数精确控制图片生成获得改进
     *   **v3.3.46 (2026-01-20)**:
         -   **[功能增强] Token 使用统计 (Token Stats) 深度优化与国际化标准化 (PR #892)**:
             -   **UI/UX 统一**: 实现了自定义 Tooltip 组件，统一了面积图、柱状图和饼图的悬浮提示样式，增强了深色模式下的对比度与可读性。

@@ -36,6 +36,8 @@ mod tests {
             }),
             metadata: None,
             output_config: None,
+            size: None,
+            quality: None,
         };
 
         // 2. 执行转换

@@ -103,6 +103,8 @@ pub async fn handle_warmup(
             }),
             thinking: None,
             output_config: None,
+            size: None,
+            quality: None,
         };
 
         match crate::proxy::mappers::claude::transform_claude_request_in(

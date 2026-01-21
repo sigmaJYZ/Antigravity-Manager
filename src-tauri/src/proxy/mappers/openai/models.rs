@@ -30,6 +30,11 @@ pub struct OpenAIRequest {
     // Codex proprietary fields
     pub instructions: Option<String>,
     pub input: Option<Value>,
+    // [NEW] Image generation parameters (for Chat API compatibility)
+    #[serde(default)]
+    pub size: Option<String>,
+    #[serde(default)]
+    pub quality: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

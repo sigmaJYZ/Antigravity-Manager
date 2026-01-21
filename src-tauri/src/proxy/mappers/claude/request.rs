@@ -407,7 +407,13 @@ pub fn transform_claude_request_in(
 
 
     // Resolve grounding config
-    let config = crate::proxy::mappers::common_utils::resolve_request_config(&claude_req.model, &mapped_model, &tools_val);
+    let config = crate::proxy::mappers::common_utils::resolve_request_config(
+        &claude_req.model, 
+        &mapped_model, 
+        &tools_val,
+        claude_req.size.as_deref(),      // [NEW] Pass size parameter
+        claude_req.quality.as_deref()    // [NEW] Pass quality parameter
+    );
     
     // [CRITICAL FIX] Disable dummy thought injection for Vertex AI
     // [CRITICAL FIX] Disable dummy thought injection for Vertex AI
@@ -1748,6 +1754,8 @@ mod tests {
             thinking: None,
             metadata: None,
             output_config: None,
+            size: None,
+            quality: None,
         };
 
         let result = transform_claude_request_in(&req, "test-project", false);
@@ -1845,6 +1853,8 @@ mod tests {
             thinking: None,
             metadata: None,
             output_config: None,
+            size: None,
+            quality: None,
         };
 
         let result = transform_claude_request_in(&req, "test-project", false);
@@ -1915,6 +1925,8 @@ mod tests {
             thinking: None,
             metadata: None,
             output_config: None,
+            size: None,
+            quality: None,
         };
 
         let result = transform_claude_request_in(&req, "test-project", false);
@@ -1990,6 +2002,8 @@ mod tests {
             }),
             metadata: None,
             output_config: None,
+            size: None,
+            quality: None,
         };
 
         let result = transform_claude_request_in(&req, "test-project", false);
@@ -2039,6 +2053,8 @@ mod tests {
             thinking: None, // 未启用 thinking
             metadata: None,
             output_config: None,
+            size: None,
+            quality: None,
         };
 
         let result = transform_claude_request_in(&req, "test-project", false);
@@ -2092,6 +2108,8 @@ mod tests {
             }),
             metadata: None,
             output_config: None,
+            size: None,
+            quality: None,
         };
 
         let result = transform_claude_request_in(&req, "test-project", false);
@@ -2132,6 +2150,8 @@ mod tests {
             thinking: None,
             metadata: None,
             output_config: None,
+            size: None,
+            quality: None,
         };
 
         let result = transform_claude_request_in(&req, "test-project", false);

@@ -441,7 +441,13 @@ pub async fn handle_messages(
             list.iter().map(|t| serde_json::to_value(t).unwrap_or(json!({}))).collect()
         });
 
-        let config = crate::proxy::mappers::common_utils::resolve_request_config(&request_for_body.model, &mapped_model, &tools_val);
+        let config = crate::proxy::mappers::common_utils::resolve_request_config(
+            &request_for_body.model, 
+            &mapped_model, 
+            &tools_val,
+            request.size.as_deref(),      // [NEW] Pass size parameter
+            request.quality.as_deref()    // [NEW] Pass quality parameter
+        );
 
         // 0. 尝试提取 session_id 用于粘性调度 (Phase 2/3)
         // 使用 SessionManager 生成稳定的会话指纹
