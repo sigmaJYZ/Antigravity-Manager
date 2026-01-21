@@ -547,6 +547,26 @@
                 "enable_usage_scaling_tooltip": "For Claude protocol. Enables aggressive scaling when total input exceeds 30k tokens to prevent frequent client-side compression. Note: Reported usage will not reflect actual billing after enabling."
             }
         },
+        "cloudflared": {
+            "title": "Public Access (Cloudflared)",
+            "not_installed": "Cloudflared not installed",
+            "install_hint": "Cloudflared is a free tunnel tool from Cloudflare. It exposes your local proxy to the internet without a public IP or port forwarding. Click the button below to install.",
+            "install": "Install Now",
+            "install_success": "Cloudflared installed successfully",
+            "installed": "Installed",
+            "mode_quick": "Quick Tunnel",
+            "mode_quick_desc": "Auto-generated temporary URL (*.trycloudflare.com), no account needed, URL changes on restart",
+            "mode_auth": "Named Tunnel",
+            "mode_auth_desc": "Use Cloudflare account token, supports custom domain, persistent URL",
+            "token": "Tunnel Token",
+            "token_hint": "Get from Cloudflare Zero Trust dashboard",
+            "use_http2": "Use HTTP/2",
+            "use_http2_desc": "More compatible, recommended for China mainland",
+            "running": "Tunnel Running",
+            "started": "Tunnel started",
+            "stopped": "Tunnel stopped",
+            "require_proxy_running": "Please start the local proxy service first"
+        },
         "example": {
             "title": "Usage Examples",
             "curl": "cURL",

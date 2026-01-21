@@ -90,3 +90,25 @@ export interface AppConfig {
     proxy: ProxyConfig;
 }
 
+// ============================================================================
+// Cloudflared (CF隧道) 类型定义
+// ============================================================================
+
+export type TunnelMode = 'quick' | 'auth';
+
+export interface CloudflaredConfig {
+    enabled: boolean;
+    mode: TunnelMode;
+    port: number;
+    token?: string;
+    use_http2: boolean;
+}
+
+export interface CloudflaredStatus {
+    installed: boolean;
+    version?: string;
+    running: boolean;
+    url?: string;
+    error?: string;
+}
+

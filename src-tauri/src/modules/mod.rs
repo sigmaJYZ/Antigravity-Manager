@@ -15,6 +15,7 @@ pub mod update_checker;
 pub mod scheduler;
 pub mod http_api;
 pub mod token_stats;
+pub mod cloudflared;
 
 use crate::models;
 

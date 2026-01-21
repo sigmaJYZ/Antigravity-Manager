@@ -547,6 +547,26 @@
                 "enable_usage_scaling_tooltip": "针对 Claude 兼容协议。当总输入超过 30k Token 时开启激进缩放，防止在大上下文下频繁触发客户端压缩。注意：开启后客户端显示的用量不再代表实际计费点数。"
             }
         },
+        "cloudflared": {
+            "title": "公网访问 (Cloudflared)",
+            "not_installed": "Cloudflared 未安装",
+            "install_hint": "Cloudflared 是 Cloudflare 提供的免费隧道工具，可将本地反代服务暴露到公网，无需公网IP或端口映射。点击下方按钮一键下载安装。",
+            "install": "一键安装",
+            "install_success": "Cloudflared 安装成功",
+            "installed": "已安装",
+            "mode_quick": "快速隧道",
+            "mode_quick_desc": "自动生成临时 URL (*.trycloudflare.com)，无需账号，重启后URL会变化",
+            "mode_auth": "命名隧道",
+            "mode_auth_desc": "使用 Cloudflare 账号 Token，支持自定义域名，URL固定不变",
+            "token": "隧道 Token",
+            "token_hint": "从 Cloudflare Zero Trust 控制台获取",
+            "use_http2": "使用 HTTP/2",
+            "use_http2_desc": "兼容性更好，推荐中国大陆用户开启",
+            "running": "隧道运行中",
+            "started": "隧道已启动",
+            "stopped": "隧道已停止",
+            "require_proxy_running": "请先启动本地反代服务，再开启隧道"
+        },
         "example": {
             "title": "使用示例",
             "curl": "cURL",

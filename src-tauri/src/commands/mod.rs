@@ -7,6 +7,8 @@ use tauri::{Emitter, Manager};
 pub mod proxy;
 // 导出 autostart 命令
 pub mod autostart;
+// 导出 cloudflared 命令
+pub mod cloudflared;
 
 /// 列出所有账号
 #[tauri::command]
