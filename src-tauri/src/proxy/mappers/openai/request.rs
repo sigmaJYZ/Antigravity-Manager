@@ -91,6 +91,25 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
         tracing::debug!("从全局存储获取到 thoughtSignature (长度: {})", global_thought_sig.as_ref().unwrap().len());
     }
 
+    // [New] 预先构建工具名称到原始 Schema 的映射，用于后续参数类型修正
+    let mut tool_name_to_schema = std::collections::HashMap::new();
+    if let Some(tools) = &request.tools {
+        for tool in tools {
+            if let (Some(name), Some(params)) = (
+                tool.get("function").and_then(|f| f.get("name")).and_then(|v| v.as_str()),
+                tool.get("function").and_then(|f| f.get("parameters"))
+            ) {
+                tool_name_to_schema.insert(name.to_string(), params.clone());
+            } else if let (Some(name), Some(params)) = (
+                tool.get("name").and_then(|v| v.as_str()),
+                tool.get("parameters")
+            ) {
+                // 处理某些客户端可能透传的精简格式
+                tool_name_to_schema.insert(name.to_string(), params.clone());
+            }
+        }
+    }
+
     // 2. 构建 Gemini contents (过滤掉 system/developer 指令)
     let contents: Vec<Value> = request
         .messages
@@ -232,16 +251,12 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
                     }
                     */
 
+
                     let mut args = serde_json::from_str::<Value>(&tc.function.arguments).unwrap_or(json!({}));
                     
-                    // [CRITICAL FIX] Shell tool command must be an array of strings
-                    if tc.function.name == "local_shell_call" {
-                        if let Some(command) = args.get_mut("command") {
-                            if let Value::String(s) = command {
-                                tracing::info!("[OpenAI-Request] Converting shell command string to array: {}", s);
-                                *command = json!([s]);
-                            }
-                        }
+                    // [New] 利用通用引擎修正参数类型 (替代以前硬编码的 shell 工具修复逻辑)
+                    if let Some(original_schema) = tool_name_to_schema.get(&tc.function.name) {
+                        crate::proxy::common::json_schema::fix_tool_call_args(&mut args, original_schema);
                     }
 
                     let mut func_call_part = json!({

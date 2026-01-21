@@ -193,6 +193,235 @@ impl ContextManager {
 
         modified
     }
+    
+    // ===== [Layer 2] Thinking Content Compression + Signature Preservation =====
+    // Borrowed from learn-claude-code's "append-only log" principle
+    // This layer compresses thinking text but PRESERVES signatures
+    // Advantage: Signature chain remains intact, tool calls won't break
+    // Disadvantage: Still breaks Prompt Cache (modifies content)
+    
+    /// Compress thinking content while preserving signatures
+    /// 
+    /// This function:
+    /// 1. Keeps signatures intact (critical for tool call chain)
+    /// 2. Compresses thinking text to "..." placeholder
+    /// 3. Protects the last N messages from compression
+    /// 
+    /// Returns true if any thinking blocks were compressed
+    pub fn compress_thinking_preserve_signature(
+        messages: &mut Vec<Message>,
+        protected_last_n: usize,
+    ) -> bool {
+        let total_msgs = messages.len();
+        if total_msgs == 0 {
+            return false;
+        }
+        
+        let start_protection_idx = total_msgs.saturating_sub(protected_last_n);
+        let mut compressed_count = 0;
+        let mut total_chars_saved = 0;
+        
+        for (i, msg) in messages.iter_mut().enumerate() {
+            // Skip protected messages
+            if i >= start_protection_idx {
+                continue;
+            }
+            
+            // Only process assistant messages
+            if msg.role == "assistant" {
+                if let MessageContent::Array(blocks) = &mut msg.content {
+                    for block in blocks.iter_mut() {
+                        if let ContentBlock::Thinking { thinking, signature, .. } = block {
+                            // Key logic: Only compress if signature exists
+                            // This ensures we don't lose unsigned thinking blocks
+                            if signature.is_some() && thinking.len() > 10 {
+                                let original_len = thinking.len();
+                                *thinking = "...".to_string();
+                                compressed_count += 1;
+                                total_chars_saved += original_len - 3;
+                                
+                                debug!(
+                                    "[ContextManager] [Layer-2] Compressed thinking: {} → 3 chars (signature preserved)",
+                                    original_len
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if compressed_count > 0 {
+            let estimated_tokens_saved = (total_chars_saved as f32 / 3.5).ceil() as u32;
+            info!(
+                "[ContextManager] [Layer-2] Compressed {} thinking blocks (saved ~{} tokens, signatures preserved)",
+                compressed_count, estimated_tokens_saved
+            );
+        }
+        
+        compressed_count > 0
+    }
+    
+    // ===== [Layer 3 Helper] Extract Last Valid Signature =====
+    // Used by Layer 3 to preserve signature when generating XML summary
+    
+    /// Extract the last valid thinking signature from message history
+    /// 
+    /// This is critical for Layer 3 (Fork + Summary) to preserve the signature chain.
+    /// The signature will be embedded in the XML summary and restored after fork.
+    /// 
+    /// Returns None if no valid signature found (length >= 50)
+    pub fn extract_last_valid_signature(messages: &[Message]) -> Option<String> {
+        // Iterate in reverse to find the most recent signature
+        for msg in messages.iter().rev() {
+            if msg.role == "assistant" {
+                if let MessageContent::Array(blocks) = &msg.content {
+                    for block in blocks {
+                        if let ContentBlock::Thinking { signature: Some(sig), .. } = block {
+                            // Minimum signature length check (same as SignatureCache)
+                            if sig.len() >= 50 {
+                                debug!(
+                                    "[ContextManager] [Layer-3] Extracted last valid signature (len: {})",
+                                    sig.len()
+                                );
+                                return Some(sig.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        debug!("[ContextManager] [Layer-3] No valid signature found in history");
+        None
+    }
+    
+    // ===== [Layer 1] Tool Message Intelligent Trimming =====
+    // Borrowed from Practical-Guide-to-Context-Engineering
+    // This layer removes old tool call/result pairs while preserving recent ones
+    // Advantage: Does NOT break Prompt Cache (only removes messages, doesn't modify content)
+    
+    /// Trim old tool messages, keeping only the last N rounds
+    /// 
+    /// A "tool round" consists of:
+    /// - An assistant message with tool_use
+    /// - One or more user messages with tool_result
+    /// 
+    /// Returns true if any messages were removed
+    pub fn trim_tool_messages(
+        messages: &mut Vec<Message>,
+        keep_last_n_rounds: usize,
+    ) -> bool {
+        let tool_rounds = identify_tool_rounds(messages);
+        
+        if tool_rounds.len() <= keep_last_n_rounds {
+            return false; // No trimming needed
+        }
+        
+        // Identify indices to remove (older rounds)
+        let rounds_to_remove = tool_rounds.len() - keep_last_n_rounds;
+        let mut indices_to_remove = std::collections::HashSet::new();
+        
+        for round in tool_rounds.iter().take(rounds_to_remove) {
+            for idx in &round.indices {
+                indices_to_remove.insert(*idx);
+            }
+        }
+        
+        // Remove in reverse order to avoid index shifting
+        let mut removed_count = 0;
+        for idx in (0..messages.len()).rev() {
+            if indices_to_remove.contains(&idx) {
+                messages.remove(idx);
+                removed_count += 1;
+            }
+        }
+        
+        if removed_count > 0 {
+            info!(
+                "[ContextManager] [Layer-1] Trimmed {} tool messages, kept last {} rounds",
+                removed_count, keep_last_n_rounds
+            );
+        }
+        
+        removed_count > 0
+    }
+}
+
+/// Represents a tool call round (assistant tool_use + user tool_result(s))
+#[derive(Debug)]
+struct ToolRound {
+    assistant_index: usize,
+    tool_result_indices: Vec<usize>,
+    indices: Vec<usize>, // All indices in this round
+}
+
+/// Identify tool call rounds in the message history
+fn identify_tool_rounds(messages: &[Message]) -> Vec<ToolRound> {
+    let mut rounds = Vec::new();
+    let mut current_round: Option<ToolRound> = None;
+    
+    for (i, msg) in messages.iter().enumerate() {
+        match msg.role.as_str() {
+            "assistant" => {
+                if has_tool_use(&msg.content) {
+                    // Save previous round if exists
+                    if let Some(round) = current_round.take() {
+                        rounds.push(round);
+                    }
+                    // Start new round
+                    current_round = Some(ToolRound {
+                        assistant_index: i,
+                        tool_result_indices: Vec::new(),
+                        indices: vec![i],
+                    });
+                }
+            }
+            "user" => {
+                if let Some(ref mut round) = current_round {
+                    if has_tool_result(&msg.content) {
+                        round.tool_result_indices.push(i);
+                        round.indices.push(i);
+                    } else {
+                        // Normal user message ends the current round
+                        rounds.push(current_round.take().unwrap());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    
+    // Save last round if exists
+    if let Some(round) = current_round {
+        rounds.push(round);
+    }
+    
+    debug!(
+        "[ContextManager] Identified {} tool rounds in {} messages",
+        rounds.len(),
+        messages.len()
+    );
+    
+    rounds
+}
+
+/// Check if message content contains tool_use
+fn has_tool_use(content: &MessageContent) -> bool {
+    if let MessageContent::Array(blocks) = content {
+        blocks.iter().any(|b| matches!(b, ContentBlock::ToolUse { .. }))
+    } else {
+        false
+    }
+}
+
+/// Check if message content contains tool_result
+fn has_tool_result(content: &MessageContent) -> bool {
+    if let MessageContent::Array(blocks) = content {
+        blocks.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. }))
+    } else {
+        false
+    }
 }
 
 #[cfg(test)]
@@ -214,6 +443,8 @@ mod tests {
             thinking: None,
             metadata: None,
             output_config: None,
+            size: None,
+            quality: None,
         }
     }
 

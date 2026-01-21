@@ -260,6 +260,21 @@ print(response.choices[0].message.content)
                 - Transparent: Detailed logs record each layer's trigger and effect
                 - Fault-tolerant: Layer 3 returns friendly error on failure
             -   **Impact**: Completely resolves context management issues in long conversations, significantly reduces API costs, ensures tool call chain integrity
+        -   **[Critical Fix] Thinking Signature Recovery Logic Optimization**:
+            -   **Background**: In retry scenarios, signature check logic didn't check Session Cache, causing incorrect Thinking mode disabling, resulting in 0 token requests and response failures
+            -   **Symptoms**:
+                - Retry shows "No valid signature found for function calls. Disabling thinking"
+                - Traffic logs show `I: 0, O: 0` (actual request succeeded but tokens not recorded)
+                - Client may not receive response content
+            -   **Fix Details**:
+                - **Extended Signature Check Scope**: `has_valid_signature_for_function_calls()` now checks Session Cache
+                - **Check Priority**: Global Store → **Session Cache (NEW)** → Message History
+                - **Detailed Logging**: Added signature source tracking logs for debugging
+            -   **Technical Implementation**:
+                - Modified signature validation logic in `request.rs`
+                - Added `session_id` parameter passing to signature check function
+                - Added `[Signature-Check]` log series for tracking signature recovery process
+            -   **Impact**: Completely resolves Thinking mode degradation in retry scenarios, ensures Token statistics accuracy, improves long session stability
         -   **[Core Fix] Universal Parameter Alignment Engine**:
             -   **Background**: Completely resolves `400 Bad Request` errors from the Gemini API caused by parameter type mismatches (e.g., string instead of number) during Tool Use.
             -   **Fix Details**:

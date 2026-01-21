@@ -393,7 +393,22 @@ response = client.chat.completions.create(
                 - 自动化：无需手动 `/compact`，系统自动处理
                 - 透明化：详细日志记录每层压缩的触发和效果
                 - 容错性：Layer 3 失败时返回友好错误提示
-            -   **影响范围**: 彻底解决长对话场景下的上下文管理问题，显著降低 API 成本，确保工具调用链完整性
+            -   **影响范围**: 彻底解决长对话场景下的上下文管理问题,显著降低 API 成本,确保工具调用链完整性
+        -   **[关键修复] Thinking 签名恢复逻辑优化**:
+            -   **背景**: 在重试场景下,签名检查逻辑未检查 Session Cache,导致错误禁用 Thinking 模式,产生 0 token 请求和响应失败
+            -   **问题表现**:
+                - 重试时显示 "No valid signature found for function calls. Disabling thinking"
+                - 流量日志显示 `I: 0, O: 0` (实际请求成功但 Token 未记录)
+                - 客户端可能无法接收到响应内容
+            -   **修复内容**:
+                - **扩展签名检查范围**: `has_valid_signature_for_function_calls()` 现在检查 Session Cache
+                - **检查优先级**: Global Store → **Session Cache (新增)** → Message History
+                - **详细日志**: 添加签名来源追踪日志,便于调试
+            -   **技术实现**:
+                - 修改 `request.rs` 中的签名验证逻辑
+                - 新增 `session_id` 参数传递到签名检查函数
+                - 添加 `[Signature-Check]` 系列日志用于追踪签名恢复过程
+            -   **影响**: 彻底解决重试场景下的 Thinking 模式降级问题,确保 Token 统计准确性,提升长会话稳定性
         -   **[核心修复] 通用参数对齐引擎 (Universal Parameter Alignment Engine)**:
             -   **背景**: 彻底解决 Gemini API 在调用工具（Tool Use）时因参数类型不匹配产生的 `400 Bad Request` 错误。
             -   **修复内容**:

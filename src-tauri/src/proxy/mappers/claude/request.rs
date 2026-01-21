@@ -383,6 +383,16 @@ pub fn transform_claude_request_in(
         })
         .unwrap_or(false);
 
+    // [New] 预先构建工具名称到原始 Schema 的映射，用于后续参数类型修正
+    let mut tool_name_to_schema = HashMap::new();
+    if let Some(tools) = &claude_req.tools {
+        for tool in tools {
+            if let (Some(name), Some(schema)) = (&tool.name, &tool.input_schema) {
+                tool_name_to_schema.insert(name.clone(), schema.clone());
+            }
+        }
+    }
+
     // 1. System Instruction (注入动态身份防护 & MCP XML 协议)
     let system_instruction = build_system_instruction(&claude_req.system, &claude_req.model, has_mcp_tools);
 
@@ -495,7 +505,7 @@ pub fn transform_claude_request_in(
         }
 
         if needs_signature_check
-            && !has_valid_signature_for_function_calls(&claude_req.messages, &global_sig)
+            && !has_valid_signature_for_function_calls(&claude_req.messages, &global_sig, &session_id)
         {
             tracing::warn!(
                 "[Thinking-Mode] [FIX #295] No valid signature found for function calls. \
@@ -513,6 +523,7 @@ pub fn transform_claude_request_in(
         &claude_req.messages,
         claude_req,
         &mut tool_id_to_name,
+        &tool_name_to_schema,
         is_thinking_enabled,
         allow_dummy_thought,
         &mapped_model,
@@ -664,18 +675,38 @@ const MIN_SIGNATURE_LENGTH: usize = 50;
 
 /// [FIX #295] Check if we have any valid signature available for function calls
 /// This prevents Gemini 3 Pro from rejecting requests due to missing thought_signature
+/// 
+/// [NEW FIX] Now also checks Session Cache to support retry scenarios
 fn has_valid_signature_for_function_calls(
     messages: &[Message],
     global_sig: &Option<String>,
+    session_id: &str,  // NEW: Add session_id parameter
 ) -> bool {
-    // 1. Check global store
+    // 1. Check global store (deprecated but kept for compatibility)
     if let Some(sig) = global_sig {
         if sig.len() >= MIN_SIGNATURE_LENGTH {
+            tracing::debug!(
+                "[Signature-Check] Found valid signature in global store (len: {})",
+                sig.len()
+            );
             return true;
         }
     }
 
-    // 2. Check if any message has a thinking block with valid signature
+    // 2. [NEW] Check Session Cache - this is critical for retry scenarios
+    // When retrying, the signature may not be in messages but exists in Session Cache
+    if let Some(sig) = crate::proxy::SignatureCache::global().get_session_signature(session_id) {
+        if sig.len() >= MIN_SIGNATURE_LENGTH {
+            tracing::info!(
+                "[Signature-Check] Found valid signature in SESSION cache (session: {}, len: {})",
+                session_id,
+                sig.len()
+            );
+            return true;
+        }
+    }
+
+    // 3. Check if any message has a thinking block with valid signature
     for msg in messages.iter().rev() {
         if msg.role == "assistant" {
             if let MessageContent::Array(blocks) = &msg.content {
@@ -686,6 +717,10 @@ fn has_valid_signature_for_function_calls(
                     } = block
                     {
                         if sig.len() >= MIN_SIGNATURE_LENGTH {
+                            tracing::debug!(
+                                "[Signature-Check] Found valid signature in message history (len: {})",
+                                sig.len()
+                            );
                             return true;
                         }
                     }
@@ -693,6 +728,11 @@ fn has_valid_signature_for_function_calls(
             }
         }
     }
+    
+    tracing::warn!(
+        "[Signature-Check] No valid signature found (session: {}, checked: global store, session cache, message history)",
+        session_id
+    );
     false
 }
 
@@ -804,6 +844,7 @@ fn build_contents(
     allow_dummy_thought: bool,
     is_retry: bool,
     tool_id_to_name: &mut HashMap<String, String>,
+    tool_name_to_schema: &HashMap<String, Value>,
     mapped_model: &str,
     last_thought_signature: &mut Option<String>,
     pending_tool_use_ids: &mut Vec<String>,
@@ -976,14 +1017,9 @@ fn build_contents(
                     ContentBlock::ToolUse { id, name, input, signature, .. } => {
                         let mut final_input = input.clone();
                         
-                        // [CRITICAL FIX] Shell tool command must be an array of strings
-                        if name == "local_shell_call" {
-                            if let Some(command) = final_input.get_mut("command") {
-                                if let Value::String(s) = command {
-                                    tracing::info!("[Claude-Request] Converting shell command string to array: {}", s);
-                                    *command = json!([s]);
-                                }
-                            }
+                        // [New] 利用通用引擎修正参数类型 (替代以前硬编码的 shell 工具修复逻辑)
+                        if let Some(original_schema) = tool_name_to_schema.get(name) {
+                            crate::proxy::common::json_schema::fix_tool_call_args(&mut final_input, original_schema);
                         }
 
                         let mut part = json!({
@@ -1291,6 +1327,7 @@ fn build_google_content(
     allow_dummy_thought: bool,
     is_retry: bool,
     tool_id_to_name: &mut HashMap<String, String>,
+    tool_name_to_schema: &HashMap<String, Value>,
     mapped_model: &str,
     last_thought_signature: &mut Option<String>,
     pending_tool_use_ids: &mut Vec<String>,
@@ -1345,6 +1382,7 @@ fn build_google_content(
         allow_dummy_thought,
         is_retry,
         tool_id_to_name,
+        tool_name_to_schema,
         mapped_model,
         last_thought_signature,
         pending_tool_use_ids,
@@ -1368,6 +1406,7 @@ fn build_google_contents(
     messages: &[Message],
     claude_req: &ClaudeRequest,
     tool_id_to_name: &mut HashMap<String, String>,
+    tool_name_to_schema: &HashMap<String, Value>,
     is_thinking_enabled: bool,
     allow_dummy_thought: bool,
     mapped_model: &str,
@@ -1408,6 +1447,7 @@ fn build_google_contents(
             allow_dummy_thought,
             is_retry,
             tool_id_to_name,
+            tool_name_to_schema,
             mapped_model,
             &mut last_thought_signature,
             &mut pending_tool_use_ids,
