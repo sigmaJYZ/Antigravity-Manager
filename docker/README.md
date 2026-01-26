@@ -8,7 +8,7 @@
 您可以直接從 Docker Hub 拉取已構建好的鏡像並啟动，無需獲取源碼：
 
 > [!IMPORTANT]
-> **安全警告**：從 v4.0.1 開始，Docker 版 Web 管理界面默認開啟強制鑒權。
+> **安全警告**：從 v4.0.2 開始，Docker 版 Web 管理界面默認開啟強制鑒權。
 > *   **推薦方式**：通過 `-e API_KEY=xxx` 設置您的自定義密鑰。
 > *   **默認行為**：如果您未設置密鑰，系統會在啟動時生成一個隨機密鑰。您可以在容器日誌中搜索 `Current API Key` 來查看它。
 > *   **查看方式**：執行 `docker logs antigravity-manager` 或 `grep '"api_key"' ~/.antigravity_tools/gui_config.json`。
@@ -71,7 +71,7 @@ docker build --build-arg USE_MIRROR=true -t antigravity-manager:latest -f docker
 ```bash
 # 打上版本標籤並推送
 docker tag antigravity-manager:latest lbjlaq/antigravity-manager:latest
-docker tag antigravity-manager:latest lbjlaq/antigravity-manager:4.0.1
+docker tag antigravity-manager:latest lbjlaq/antigravity-manager:4.0.2
 docker push lbjlaq/antigravity-manager:latest
-docker push lbjlaq/antigravity-manager:4.0.1
+docker push lbjlaq/antigravity-manager:4.0.2
 ```

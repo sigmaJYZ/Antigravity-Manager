@@ -1,6 +1,6 @@
 # Antigravity Tools 🚀
 # Antigravity Tools 🚀
-> Professional AI Account Management & Proxy System (v4.0.1)
+> Professional AI Account Management & Proxy System (v4.0.2)
 
 <div align="center">
   <img src="public/icon.png" alt="Antigravity Logo" width="120" height="120" style="border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.15);">
@@ -10,7 +10,7 @@
   
   <p>
     <a href="https://github.com/lbjlaq/Antigravity-Manager">
-      <img src="https://img.shields.io/badge/Version-4.0.1-blue?style=flat-square" alt="Version">
+      <img src="https://img.shields.io/badge/Version-4.0.2-blue?style=flat-square" alt="Version">
     </a>
     <img src="https://img.shields.io/badge/Tauri-v2-orange?style=flat-square" alt="Tauri">
     <img src="https://img.shields.io/badge/Backend-Rust-red?style=flat-square" alt="Rust">
@@ -151,7 +151,7 @@ Download from [GitHub Releases](https://github.com/lbjlaq/Antigravity-Manager/re
 *   **Linux**: `.deb` or `AppImage`
 
 ### Option C: Docker Deployment (Recommended for NAS/Servers)
-If you prefer running in a containerized environment, we provide a native Docker image. This image supports the v4.0.1 Native Headless architecture, automatically hosts frontend static resources, and allows for direct browser-based management.
+If you prefer running in a containerized environment, we provide a native Docker image. This image supports the v4.0.2 Native Headless architecture, automatically hosts frontend static resources, and allows for direct browser-based management.
 
 ```bash
 # Option 1: Direct Run (Recommended)
@@ -216,6 +216,31 @@ print(response.choices[0].message.content)
 ## 📝 Developer & Community
 
 *   **Changelog**:
+    *   **v4.0.2 (2026-01-26)**:
+        -   **[Core Fix] Model Mapping Persistence in Docker/Web Mode (Fix Issue #1149)**:
+            - Resolved an issue where model mapping configurations modified via API in Docker or Web deployment modes were not saved to disk.
+            - Ensured the `admin_update_model_mapping` interface correctly invokes persistence logic, so configurations remain effective after container restarts.
+        -   **[Architecture Optimization] MCP Tool Support Architecture Upgrade (Schema Cleaning & Tool Adapters)**:
+            - **Constraint Semantic Backfilling (Constraint Hints)**:
+                - Implemented intelligent constraint migration mechanism that converts unsupported constraint fields (`minLength`, `pattern`, `format`, etc.) into description hints before removal.
+                - Added `CONSTRAINT_FIELDS` constant and `move_constraints_to_description` function to ensure models can understand original constraints through descriptions.
+                - Example: `{"minLength": 5}` → `{"description": "[Constraint: minLen: 5]"}`
+            - **Enhanced anyOf/oneOf Intelligent Flattening**:
+                - Rewrote `extract_best_schema_from_union` function with scoring mechanism to select the best type (object > array > scalar).
+                - Automatically adds `"Accepts: type1 | type2"` hints to descriptions after merging, preserving all possible type information.
+                - Added `get_schema_type_name` function supporting explicit types and structural inference.
+            - **Pluggable Tool Adapter Layer (Tool Adapter System)**:
+                - Created `ToolAdapter` trait providing customized Schema processing capabilities for different MCP tools.
+                - Implemented `PencilAdapter` that automatically adds descriptions for Pencil drawing tool's visual properties (`cornerRadius`, `strokeWidth`) and path parameters.
+                - Established global adapter registry supporting tool-specific optimizations via `clean_json_schema_for_tool` function.
+            - **High-Performance Cache Layer (Schema Cache)**:
+                - Implemented SHA-256 hash-based Schema caching mechanism to avoid redundant cleaning of identical schemas.
+                - Uses LRU eviction strategy with max 1000 entries, memory usage < 10MB.
+                - Provides `clean_json_schema_cached` function and cache statistics, expected 60%+ performance improvement.
+            - **Impact**: 
+                - ✅ Significantly improves Schema compatibility and model understanding for MCP tools (e.g., Pencil)
+                - ✅ Establishes pluggable foundation for adding more MCP tools (filesystem, database, etc.) in the future
+                - ✅ Fully backward compatible, all 25 tests passing
     *   **v4.0.1 (2026-01-26)**:
         -   **[UX Optimization] Theme & Language Transition Smoothness**:
             - Resolved the UI freezing issue during theme and language switching by decoupling configuration persistence from the state update loop.

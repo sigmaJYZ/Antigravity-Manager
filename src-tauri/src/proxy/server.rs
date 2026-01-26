@@ -1000,9 +1000,26 @@ async fn admin_update_model_mapping(
     Json(payload): Json<UpdateMappingWrapper>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
     let config = payload.config;
-    let mut mapping = state.custom_mapping.write().await;
-    *mapping = config.custom_mapping;
-    logger::log_info("[API] 模型映射已通过 API 热更新");
+    
+    // 1. 更新内存状态 (热更新)
+    {
+        let mut mapping = state.custom_mapping.write().await;
+        *mapping = config.custom_mapping.clone();
+    }
+    
+    // 2. 持久化到硬盘 (修复 #1149)
+    // 加载当前配置，更新 mapping，然后保存
+    let mut app_config = crate::modules::config::load_app_config().map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e }))
+    })?;
+    
+    app_config.proxy.custom_mapping = config.custom_mapping;
+    
+    crate::modules::config::save_app_config(&app_config).map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e }))
+    })?;
+
+    logger::log_info("[API] 模型映射已通过 API 热更新并保存");
     Ok(StatusCode::OK)
 }
 

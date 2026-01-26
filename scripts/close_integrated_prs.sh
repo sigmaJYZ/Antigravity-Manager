@@ -4,7 +4,7 @@
 # 使用前请确保已安装并登录 GitHub CLI: brew install gh && gh auth login
 
 REPO="lbjlaq/Antigravity-Manager"
-VERSION="v4.0.1"
+VERSION="v4.0.2"
 
 # 感谢消息模板
 THANK_YOU_MESSAGE="感谢您的贡献！🎉
