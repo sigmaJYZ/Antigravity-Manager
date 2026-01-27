@@ -11,6 +11,7 @@ import vi from "./locales/vi.json";
 import pt from "./locales/pt.json";
 import ru from "./locales/ru.json";
 import ko from "./locales/ko.json";
+import ar from "./locales/ar.json";
 
 i18n
     // detect user language
@@ -58,6 +59,9 @@ i18n
             },
             ko: {
                 translation: ko,
+            },
+            ar: {
+                translation: ar,
             },
         },
         fallbackLng: "en",

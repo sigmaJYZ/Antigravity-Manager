@@ -106,6 +106,7 @@ function Navbar() {
         { code: 'pt', label: 'Português', short: 'PT' },
         { code: 'ko', label: '한국어', short: 'KO' },
         { code: 'ru', label: 'Русский', short: 'RU' },
+        { code: 'ar', label: 'العربية', short: 'AR' },
     ];
 
     const handleLanguageChange = async (langCode: string) => {
@@ -187,7 +188,7 @@ function Navbar() {
 
                             {/* 下拉菜单 */}
                             {isLangOpen && (
-                                <div className="absolute right-0 mt-2 w-32 bg-white dark:bg-base-200 rounded-xl shadow-lg border border-gray-100 dark:border-base-100 py-1 overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right">
+                                <div className="absolute ltr:right-0 rtl:left-0 mt-2 w-32 bg-white dark:bg-base-200 rounded-xl shadow-lg border border-gray-100 dark:border-base-100 py-1 overflow-hidden animate-in fade-in zoom-in-95 duration-200 ltr:origin-top-right rtl:origin-top-left">
                                     {languages.map((lang) => (
                                         <button
                                             key={lang.code}

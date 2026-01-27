@@ -64,6 +64,12 @@ function App() {
   useEffect(() => {
     if (config?.language) {
       i18n.changeLanguage(config.language);
+      // Support RTL
+      if (config.language === 'ar') {
+        document.documentElement.dir = 'rtl';
+      } else {
+        document.documentElement.dir = 'ltr';
+      }
     }
   }, [config?.language, i18n]);
 

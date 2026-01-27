@@ -297,7 +297,7 @@ function AccountRowContent({
 }: AccountRowContentProps) {
     const { t } = useTranslation();
     const { config } = useConfigStore();
-    
+
     // 模型配置映射：model_id -> { label, protectedKey }
     const MODEL_CONFIG: Record<string, { label: string; protectedKey: string }> = {
         'gemini-3-pro-high': { label: 'G3 Pro', protectedKey: 'gemini-pro' },
@@ -305,7 +305,7 @@ function AccountRowContent({
         'gemini-3-pro-image': { label: 'G3 Image', protectedKey: 'gemini-pro-image' },
         'claude-sonnet-4-5-thinking': { label: 'Claude 4.5', protectedKey: 'claude-sonnet' },
     };
-    
+
     // 获取要显示的模型列表
     const pinnedModels = config?.pinned_quota_models?.models || Object.keys(MODEL_CONFIG);
     const isDisabled = Boolean(account.disabled);
@@ -401,7 +401,7 @@ function AccountRowContent({
                         {pinnedModels.filter(modelId => MODEL_CONFIG[modelId]).map((modelId) => {
                             const modelConfig = MODEL_CONFIG[modelId];
                             const modelData = account.quota?.models.find(m => m.name.toLowerCase() === modelId);
-                            
+
                             return (
                                 <div key={modelId} className="relative h-[22px] flex items-center px-1.5 rounded-md overflow-hidden border border-gray-100/50 dark:border-white/5 bg-gray-50/30 dark:bg-white/5 group/quota">
                                     {modelData && (
@@ -629,10 +629,10 @@ function AccountTable({
                                     onChange={onToggleAll}
                                 />
                             </th>
-                            <th className="px-4 py-1 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">{t('accounts.table.email')}</th>
-                            <th className="px-4 py-1 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[440px] min-w-[360px] whitespace-nowrap">{t('accounts.table.quota')}</th>
-                            <th className="px-4 py-1 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">{t('accounts.table.last_used')}</th>
-                            <th className="px-4 py-1 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap sticky right-0 bg-gray-50 dark:bg-base-200 z-20 shadow-[-12px_0_12px_-12px_rgba(0,0,0,0.1)] dark:shadow-[-12px_0_12px_-12px_rgba(255,255,255,0.05)] text-center">{t('accounts.table.actions')}</th>
+                            <th className="px-4 py-1 text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">{t('accounts.table.email')}</th>
+                            <th className="px-4 py-1 text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[440px] min-w-[360px] whitespace-nowrap">{t('accounts.table.quota')}</th>
+                            <th className="px-4 py-1 text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">{t('accounts.table.last_used')}</th>
+                            <th className="px-4 py-1 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap sticky right-0 bg-gray-50 dark:bg-base-200 z-20 shadow-[-12px_0_12px_-12px_rgba(0,0,0,0.1)] dark:shadow-[-12px_0_12px_-12px_rgba(255,255,255,0.05)] text-center">{t('accounts.table.actions')}</th>
                         </tr>
                     </thead>
                     <SortableContext items={accountIds} strategy={verticalListSortingStrategy}>

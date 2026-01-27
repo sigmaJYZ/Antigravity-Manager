@@ -307,6 +307,7 @@ function Settings() {
                                     <option value="pt">Português</option>
                                     <option value="ko">한국어</option>
                                     <option value="ru">Русский</option>
+                                    <option value="ar">العربية</option>
                                 </select>
                             </div>
 
