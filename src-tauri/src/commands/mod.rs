@@ -518,6 +518,22 @@ pub async fn clear_log_cache() -> Result<(), String> {
     modules::logger::clear_logs()
 }
 
+/// 清理 Antigravity 应用缓存
+/// 用于解决登录失败、版本验证错误等问题
+#[tauri::command]
+pub async fn clear_antigravity_cache() -> Result<modules::cache::ClearResult, String> {
+    modules::cache::clear_antigravity_cache(None)
+}
+
+/// 获取 Antigravity 缓存路径列表（用于预览）
+#[tauri::command]
+pub async fn get_antigravity_cache_paths() -> Result<Vec<String>, String> {
+    Ok(modules::cache::get_existing_cache_paths()
+        .into_iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect())
+}
+
 /// 打开数据目录
 #[tauri::command]
 pub async fn open_data_folder() -> Result<(), String> {

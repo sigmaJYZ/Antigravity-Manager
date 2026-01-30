@@ -12,6 +12,8 @@ import pt from "./locales/pt.json";
 import ru from "./locales/ru.json";
 import ko from "./locales/ko.json";
 import ar from "./locales/ar.json";
+import es from "./locales/es.json";
+import my from "./locales/my.json";
 
 i18n
     // detect user language
@@ -62,6 +64,24 @@ i18n
             },
             ar: {
                 translation: ar,
+            },
+            es: {
+                translation: es,
+            },
+            "es-ES": {
+                translation: es,
+            },
+            "es-MX": {
+                translation: es,
+            },
+            my: {
+                translation: my,
+            },
+            "ms": {
+                translation: my,
+            },
+            "ms-MY": {
+                translation: my,
             },
         },
         fallbackLng: "en",

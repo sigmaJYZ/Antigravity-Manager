@@ -316,6 +316,8 @@ pub fn run() {
             commands::save_text_file,
             commands::read_text_file,
             commands::clear_log_cache,
+            commands::clear_antigravity_cache,
+            commands::get_antigravity_cache_paths,
             commands::open_data_folder,
             commands::get_data_dir_path,
             commands::show_main_window,

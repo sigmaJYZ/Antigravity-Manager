@@ -57,6 +57,9 @@ export const AdminAuthGuard: React.FC<{ children: React.ReactNode }> = ({ childr
         { code: 'tr', name: 'Türkçe' },
         { code: 'vi', name: 'Tiếng Việt' },
         { code: 'pt', name: 'Português' },
+        { code: 'ar', name: 'العربية' },
+        { code: 'es', name: 'Español' },
+        { code: 'my', name: 'Bahasa Melayu' },
     ];
 
     if (isAuthenticated) {

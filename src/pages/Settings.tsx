@@ -65,6 +65,11 @@ function Settings() {
     const [isSupportModalOpen, setIsSupportModalOpen] = useState(false);
     const [dataDirPath, setDataDirPath] = useState<string>('~/.antigravity_tools/');
 
+    // Antigravity cache clearing state
+    const [isClearCacheOpen, setIsClearCacheOpen] = useState(false);
+    const [cachePaths, setCachePaths] = useState<string[]>([]);
+    const [isClearingCache, setIsClearingCache] = useState(false);
+
     // Update check state
     const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
     const [updateInfo, setUpdateInfo] = useState<{
@@ -243,6 +248,46 @@ function Settings() {
             showToast(`${t('settings.about.update_check_failed')}: ${error}`, 'error');
         } finally {
             setIsCheckingUpdate(false);
+        }
+    };
+
+    // Handle opening cache clear dialog
+    const handleOpenClearCacheDialog = async () => {
+        try {
+            const paths = await invoke<string[]>('get_antigravity_cache_paths');
+            setCachePaths(paths);
+            setIsClearCacheOpen(true);
+        } catch (error) {
+            // If no cache paths found, still allow opening the dialog
+            setCachePaths([]);
+            setIsClearCacheOpen(true);
+        }
+    };
+
+    // Handle clearing Antigravity cache
+    const confirmClearAntigravityCache = async () => {
+        setIsClearingCache(true);
+        try {
+            const result = await invoke<{
+                cleared_paths: string[];
+                total_size_freed: number;
+                errors: string[];
+            }>('clear_antigravity_cache');
+
+            const sizeMB = (result.total_size_freed / 1024 / 1024).toFixed(2);
+
+            if (result.cleared_paths.length > 0) {
+                showToast(t('settings.advanced.cache_cleared_success', { size: sizeMB }), 'success');
+            } else if (result.errors.length > 0) {
+                showToast(`${t('common.error')}: ${result.errors[0]}`, 'error');
+            } else {
+                showToast(t('settings.advanced.cache_not_found'), 'info');
+            }
+        } catch (error) {
+            showToast(`${t('common.error')}: ${error}`, 'error');
+        } finally {
+            setIsClearingCache(false);
+            setIsClearCacheOpen(false);
         }
     };
 
@@ -727,6 +772,25 @@ function Settings() {
                                     </div>
                                 </div>
 
+                                {/* Antigravity 缓存清理 */}
+                                <div className="border-t border-gray-200 dark:border-base-200 pt-4">
+                                    <h3 className="font-medium text-gray-900 dark:text-base-content mb-3">{t('settings.advanced.antigravity_cache_title', 'Antigravity 缓存清理')}</h3>
+                                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/30 rounded-lg p-3 mb-3">
+                                        <p className="text-sm text-amber-700 dark:text-amber-400">{t('settings.advanced.antigravity_cache_warning', '请确保 Antigravity 应用已完全退出后再执行清理操作。')}</p>
+                                    </div>
+                                    <div className="bg-gray-50 dark:bg-base-200 border border-gray-200 dark:border-base-300 rounded-lg p-3 mb-3">
+                                        <p className="text-sm text-gray-600 dark:text-gray-400">{t('settings.advanced.antigravity_cache_desc', '清理 Antigravity 应用的缓存可以解决登录失败、版本验证错误、OAuth 授权失败等问题。')}</p>
+                                    </div>
+                                    <div className="flex items-center gap-4">
+                                        <button
+                                            className="px-4 py-2 border border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400 rounded-lg hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors"
+                                            onClick={handleOpenClearCacheDialog}
+                                        >
+                                            {t('settings.advanced.clear_antigravity_cache', '清理 Antigravity 缓存')}
+                                        </button>
+                                    </div>
+                                </div>
+
                                 {/* 调试日志 */}
                                 <div className="border-t border-gray-200 dark:border-base-200 pt-4">
                                     <div className="space-y-3">
@@ -1031,6 +1095,44 @@ function Settings() {
                     onConfirm={confirmClearLogs}
                     onCancel={() => setIsClearLogsOpen(false)}
                 />
+
+                {/* Antigravity Cache Clear Modal */}
+                <ModalDialog
+                    isOpen={isClearCacheOpen}
+                    title={t('settings.advanced.clear_cache_confirm_title', '确认清理 Antigravity 缓存')}
+                    type="confirm"
+                    confirmText={isClearingCache ? t('common.clearing', '清理中...') : t('common.clear')}
+                    cancelText={t('common.cancel')}
+                    isDestructive={true}
+                    onConfirm={confirmClearAntigravityCache}
+                    onCancel={() => setIsClearCacheOpen(false)}
+                >
+                    <div className="space-y-3">
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                            {t('settings.advanced.clear_cache_confirm_msg', '将清理以下缓存目录：')}
+                        </p>
+                        {cachePaths.length > 0 ? (
+                            <div className="bg-gray-50 dark:bg-base-200 rounded-lg p-3 max-h-40 overflow-y-auto">
+                                <ul className="text-xs font-mono text-gray-600 dark:text-gray-400 space-y-1">
+                                    {cachePaths.map((path, index) => (
+                                        <li key={index} className="truncate">• {path}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        ) : (
+                            <div className="bg-gray-50 dark:bg-base-200 rounded-lg p-3">
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    {t('settings.advanced.cache_not_found', '未找到 Antigravity 缓存目录')}
+                                </p>
+                            </div>
+                        )}
+                        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/30 rounded-lg p-2">
+                            <p className="text-xs text-amber-700 dark:text-amber-400">
+                                {t('settings.advanced.antigravity_cache_warning', '请确保 Antigravity 应用已完全退出后再执行清理操作。')}
+                            </p>
+                        </div>
+                    </div>
+                </ModalDialog>
 
                 {/* Support Modal */}
                 <div className={`modal ${isSupportModalOpen ? 'modal-open' : ''} z-[100]`}>
