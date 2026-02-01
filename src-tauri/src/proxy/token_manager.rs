@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
 use crate::proxy::rate_limit::RateLimitTracker;
 use crate::proxy::sticky_config::StickySessionConfig;
@@ -38,6 +39,9 @@ pub struct TokenManager {
     preferred_account_id: Arc<tokio::sync::RwLock<Option<String>>>, // [FIX #820] 优先使用的账号ID（固定账号模式）
     health_scores: Arc<DashMap<String, f32>>,                       // account_id -> health_score
     circuit_breaker_config: Arc<tokio::sync::RwLock<crate::models::CircuitBreakerConfig>>, // [NEW] 熔断配置缓存
+    /// 支持优雅关闭时主动 abort 后台任务
+    auto_cleanup_handle: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    cancel_token: CancellationToken,
 }
 
 impl TokenManager {
@@ -56,26 +60,46 @@ impl TokenManager {
             circuit_breaker_config: Arc::new(tokio::sync::RwLock::new(
                 crate::models::CircuitBreakerConfig::default(),
             )),
+            auto_cleanup_handle: Arc::new(tokio::sync::Mutex::new(None)),
+            cancel_token: CancellationToken::new(),
         }
     }
 
     /// 启动限流记录自动清理后台任务（每15秒检查并清除过期记录）
-    pub fn start_auto_cleanup(&self) {
+    pub async fn start_auto_cleanup(&self) {
         let tracker = self.rate_limit_tracker.clone();
-        tokio::spawn(async move {
+        let cancel = self.cancel_token.child_token();
+
+        let handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
             loop {
-                interval.tick().await;
-                let cleaned = tracker.cleanup_expired();
-                if cleaned > 0 {
-                    tracing::info!(
-                        "🧹 Auto-cleanup: Removed {} expired rate limit record(s)",
-                        cleaned
-                    );
+                tokio::select! {
+                    _ = cancel.cancelled() => {
+                        tracing::info!("Auto-cleanup task received cancel signal");
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        let cleaned = tracker.cleanup_expired();
+                        if cleaned > 0 {
+                            tracing::info!(
+                                "Auto-cleanup: Removed {} expired rate limit record(s)",
+                                cleaned
+                            );
+                        }
+                    }
                 }
             }
         });
-        tracing::info!("✅ Rate limit auto-cleanup task started (interval: 15s)");
+
+        // 先 abort 旧任务（防止任务泄漏），再存储新 handle
+        let mut guard = self.auto_cleanup_handle.lock().await;
+        if let Some(old) = guard.take() {
+            old.abort();
+            tracing::warn!("Aborted previous auto-cleanup task");
+        }
+        *guard = Some(handle);
+
+        tracing::info!("Rate limit auto-cleanup task started (interval: 15s)");
     }
 
     /// 从主应用账号目录加载所有账号
@@ -228,9 +252,9 @@ impl TokenManager {
                 .get("validation_blocked_until")
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0);
-            
+
             let now = chrono::Utc::now().timestamp();
-            
+
             if now < block_until {
                 // Still blocked
                 tracing::debug!(
@@ -252,7 +276,7 @@ impl TokenManager {
                 account["validation_blocked"] = serde_json::Value::Bool(false);
                 account["validation_blocked_until"] = serde_json::Value::Null;
                 account["validation_blocked_reason"] = serde_json::Value::Null;
-                
+
                 // Save cleared state
                 if let Ok(json_str) = serde_json::to_string_pretty(&account) {
                     let _ = std::fs::write(path, json_str);
@@ -278,8 +302,6 @@ impl TokenManager {
             );
             return Ok(None);
         }
-
-        let account_id = account["id"].as_str().ok_or("缺少 id 字段")?.to_string();
 
         let account_id = account["id"].as_str()
             .ok_or("缺少 id 字段")?
@@ -516,6 +538,38 @@ impl TokenManager {
         }
     }
 
+    /// 从磁盘读取特定模型的 quota 百分比 [FIX] 排序使用目标模型的 quota 而非 max
+    ///
+    /// # 参数
+    /// * `account_path` - 账号 JSON 文件路径
+    /// * `model_name` - 目标模型名称（已标准化）
+    fn get_model_quota_from_json(account_path: &PathBuf, model_name: &str) -> Option<i32> {
+        let content = std::fs::read_to_string(account_path).ok()?;
+        let account: serde_json::Value = serde_json::from_str(&content).ok()?;
+        let models = account.get("quota")?.get("models")?.as_array()?;
+
+        for model in models {
+            if let Some(name) = model.get("name").and_then(|v| v.as_str()) {
+                if crate::proxy::common::model_mapping::normalize_to_standard_id(name)
+                    .unwrap_or_else(|| name.to_string())
+                    == model_name
+                {
+                    return model
+                        .get("percentage")
+                        .and_then(|v| v.as_i64())
+                        .map(|p| p as i32);
+                }
+            }
+        }
+        None
+    }
+
+    /// 测试辅助函数：公开访问 get_model_quota_from_json
+    #[cfg(test)]
+    pub fn get_model_quota_from_json_for_test(account_path: &PathBuf, model_name: &str) -> Option<i32> {
+        Self::get_model_quota_from_json(account_path, model_name)
+    }
+
     /// 触发配额保护，限制特定模型 (Issue #621)
     /// 返回 true 如果发生了改变
     async fn trigger_quota_protection(
@@ -637,6 +691,113 @@ impl TokenManager {
         Ok(false)
     }
 
+    /// P2C 算法的候选池大小 - 从前 N 个最优候选中随机选择
+    const P2C_POOL_SIZE: usize = 5;
+
+    /// Power of 2 Choices (P2C) 选择算法
+    /// 从前 5 个候选中随机选 2 个，选择配额更高的 -> 避免热点
+    /// 返回选中的索引
+    ///
+    /// # 参数
+    /// * `candidates` - 已排序的候选 token 列表
+    /// * `attempted` - 已尝试失败的账号 ID 集合
+    /// * `normalized_target` - 归一化后的目标模型名
+    /// * `quota_protection_enabled` - 是否启用配额保护
+    fn select_with_p2c<'a>(
+        &self,
+        candidates: &'a [ProxyToken],
+        attempted: &HashSet<String>,
+        normalized_target: &str,
+        quota_protection_enabled: bool,
+    ) -> Option<&'a ProxyToken> {
+        use rand::Rng;
+
+        // 过滤可用 token
+        let available: Vec<&ProxyToken> = candidates.iter()
+            .filter(|t| !attempted.contains(&t.account_id))
+            .filter(|t| !quota_protection_enabled || !t.protected_models.contains(normalized_target))
+            .collect();
+
+        if available.is_empty() { return None; }
+        if available.len() == 1 { return Some(available[0]); }
+
+        // P2C: 从前 min(P2C_POOL_SIZE, len) 个中随机选 2 个
+        let pool_size = available.len().min(Self::P2C_POOL_SIZE);
+        let mut rng = rand::thread_rng();
+
+        let pick1 = rng.gen_range(0..pool_size);
+        let pick2 = rng.gen_range(0..pool_size);
+        // 确保选择不同的两个候选
+        let pick2 = if pick2 == pick1 {
+            (pick1 + 1) % pool_size
+        } else {
+            pick2
+        };
+
+        let c1 = available[pick1];
+        let c2 = available[pick2];
+
+        // 选择配额更高的
+        let selected = if c1.remaining_quota.unwrap_or(0) >= c2.remaining_quota.unwrap_or(0) {
+            c1
+        } else {
+            c2
+        };
+
+        tracing::debug!(
+            "🎲 [P2C] Selected {} ({}%) from [{}({}%), {}({}%)]",
+            selected.email, selected.remaining_quota.unwrap_or(0),
+            c1.email, c1.remaining_quota.unwrap_or(0),
+            c2.email, c2.remaining_quota.unwrap_or(0)
+        );
+
+        Some(selected)
+    }
+
+    /// 先发送取消信号，再带超时等待任务完成
+    ///
+    /// # 参数
+    /// * `timeout` - 等待任务完成的超时时间
+    pub async fn graceful_shutdown(&self, timeout: std::time::Duration) {
+        tracing::info!("Initiating graceful shutdown of background tasks...");
+
+        // 发送取消信号给所有后台任务
+        self.cancel_token.cancel();
+
+        // 带超时等待任务完成
+        match tokio::time::timeout(timeout, self.abort_background_tasks()).await {
+            Ok(_) => tracing::info!("All background tasks cleaned up gracefully"),
+            Err(_) => tracing::warn!("Graceful cleanup timed out after {:?}, tasks were force-aborted", timeout),
+        }
+    }
+
+    /// 中止并等待所有后台任务完成
+    /// abort() 仅设置取消标志，必须 await 确认清理完成
+    pub async fn abort_background_tasks(&self) {
+        Self::abort_task(&self.auto_cleanup_handle, "Auto-cleanup task").await;
+    }
+
+    /// 中止单个后台任务并记录结果
+    ///
+    /// # 参数
+    /// * `handle` - 任务句柄的 Mutex 引用
+    /// * `task_name` - 任务名称（用于日志）
+    async fn abort_task(
+        handle: &tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+        task_name: &str,
+    ) {
+        let Some(handle) = handle.lock().await.take() else {
+            return;
+        };
+
+        handle.abort();
+        match handle.await {
+            Ok(()) => tracing::debug!("{} completed", task_name),
+            Err(e) if e.is_cancelled() => tracing::info!("{} aborted", task_name),
+            Err(e) => tracing::warn!("{} error: {}", task_name, e),
+        }
+    }
+
     /// 获取当前可用的 Token（支持粘性会话与智能调度）
     /// 参数 `quota_group` 用于区分 "claude" vs "gemini" 组
     /// 参数 `force_rotate` 为 true 时将忽略锁定，强制切换账号
@@ -692,59 +853,66 @@ impl TokenManager {
             return Err("Token pool is empty".to_string());
         }
 
-        // ===== 【优化】根据订阅等级、健康分、刷新时间、剩余配额排序 =====
-        // 优先级: 订阅等级 > 健康分 > 刷新时间（越近越优先）> 剩余配额
-        // 刷新时间差异 < 10 分钟视为相同优先级
-        const RESET_TIME_THRESHOLD_SECS: i64 = 600; // 10 分钟阈值
+        // ===== 【优化】Quota-First 排序: 保护低配额账号，均衡使用 =====
+        // 优先级: 目标模型配额 > 健康分 > 订阅等级 > 刷新时间
+        // -> 高配额账号优先被选中，避免 PRO/ULTRA 先用完丢失5小时刷新周期
+        // [FIX] 使用目标模型的 quota 而非 max(所有模型)
+        const RESET_TIME_THRESHOLD_SECS: i64 = 600; // 10 分钟阈值，差异小于此值视为相同
+
+        let normalized_target =
+            crate::proxy::common::model_mapping::normalize_to_standard_id(target_model)
+                .unwrap_or_else(|| target_model.to_string());
 
         tokens_snapshot.sort_by(|a, b| {
-            let tier_priority = |tier: &Option<String>| match tier.as_deref() {
-                Some("ULTRA") => 0,
-                Some("PRO") => 1,
-                Some("FREE") => 2,
-                _ => 3,
-            };
-
-            // First: compare by subscription tier
-            let tier_cmp = tier_priority(&a.subscription_tier)
-                .cmp(&tier_priority(&b.subscription_tier));
-
-            if tier_cmp != std::cmp::Ordering::Equal {
-                return tier_cmp;
+            // Priority 1: 目标模型的 quota (higher is better) -> 保护低配额账号
+            let quota_a = Self::get_model_quota_from_json(&a.account_path, &normalized_target)
+                .unwrap_or(a.remaining_quota.unwrap_or(0));
+            let quota_b = Self::get_model_quota_from_json(&b.account_path, &normalized_target)
+                .unwrap_or(b.remaining_quota.unwrap_or(0));
+            let quota_cmp = quota_b.cmp(&quota_a);
+            if quota_cmp != std::cmp::Ordering::Equal {
+                return quota_cmp;
             }
 
-            // Second: compare by health score (higher is better)
-            let health_cmp = b.health_score.partial_cmp(&a.health_score).unwrap_or(std::cmp::Ordering::Equal);
-
+            // Priority 2: Health score (higher is better)
+            let health_cmp = b.health_score.partial_cmp(&a.health_score)
+                .unwrap_or(std::cmp::Ordering::Equal);
             if health_cmp != std::cmp::Ordering::Equal {
                 return health_cmp;
             }
 
-            // Third: compare by reset time (earlier/closer is better)
-            // 差异 < 10 分钟视为相同优先级，避免频繁切换
-            let reset_a = a.reset_time.unwrap_or(i64::MAX);
-            let reset_b = b.reset_time.unwrap_or(i64::MAX);
-            let reset_diff = (reset_a - reset_b).abs();
-
-            if reset_diff >= RESET_TIME_THRESHOLD_SECS {
-                let reset_cmp = reset_a.cmp(&reset_b);
-                if reset_cmp != std::cmp::Ordering::Equal {
-                    return reset_cmp;
-                }
+            // Priority 3: Subscription tier (ULTRA > PRO > FREE) -> 平局时高级账号优先
+            let tier_priority = |tier: &Option<String>| {
+                let t = tier.as_deref().unwrap_or("").to_lowercase();
+                if t.contains("ultra") { 0 }
+                else if t.contains("pro") { 1 }
+                else if t.contains("free") { 2 }
+                else { 3 }
+            };
+            let tier_cmp = tier_priority(&a.subscription_tier)
+                .cmp(&tier_priority(&b.subscription_tier));
+            if tier_cmp != std::cmp::Ordering::Equal {
+                return tier_cmp;
             }
 
-            // Fourth: compare by remaining quota percentage (higher is better)
-            let quota_a = a.remaining_quota.unwrap_or(0);
-            let quota_b = b.remaining_quota.unwrap_or(0);
-            quota_b.cmp(&quota_a)
+            // Priority 4: Reset time (earlier is better, but only if diff > 10 min)
+            let reset_a = a.reset_time.unwrap_or(i64::MAX);
+            let reset_b = b.reset_time.unwrap_or(i64::MAX);
+            if (reset_a - reset_b).abs() >= RESET_TIME_THRESHOLD_SECS {
+                reset_a.cmp(&reset_b)
+            } else {
+                std::cmp::Ordering::Equal
+            }
         });
 
-        // 【调试日志】打印排序后的账号顺序
+        // 【调试日志】打印排序后的账号顺序（显示目标模型的 quota）
         tracing::debug!(
-            "🔄 [Token Rotation] Accounts: {:?}",
+            "🔄 [Token Rotation] target={} Accounts: {:?}",
+            normalized_target,
             tokens_snapshot.iter().map(|t| format!(
-                "{}(reset={:?}, quota={:?}, health={:.2}, protected={:?})",
+                "{}(quota={}%, reset={:?}, health={:.2})",
                 t.email,
+                Self::get_model_quota_from_json(&t.account_path, &normalized_target).unwrap_or(0),
                 t.reset_time.map(|ts| {
                     let now = chrono::Utc::now().timestamp();
                     let diff_secs = ts - now;
@@ -754,9 +922,7 @@ impl TokenManager {
                         "now".to_string()
                     }
                 }),
-                t.remaining_quota,
-                t.health_score,
-                t.protected_models
+                t.health_score
             )).collect::<Vec<_>>()
         );
 
@@ -974,108 +1140,60 @@ impl TokenManager {
                     }
                 }
 
-                // 若无锁定，则轮询选择新账号
+                // 若无锁定，则使用 P2C 选择账号 (避免热点问题)
                 if target_token.is_none() {
-                    let start_idx = self.current_index.fetch_add(1, Ordering::SeqCst) % total;
-                    for offset in 0..total {
-                        let idx = (start_idx + offset) % total;
-                        let candidate = &tokens_snapshot[idx];
-                        if attempted.contains(&candidate.account_id) {
-                            continue;
+                    // 先过滤出未限流的账号
+                    let mut non_limited: Vec<ProxyToken> = Vec::new();
+                    for t in &tokens_snapshot {
+                        if !self.is_rate_limited(&t.account_id, Some(&normalized_target)).await {
+                            non_limited.push(t.clone());
                         }
+                    }
 
-                        // 【新增 #621】模型级限流检查
-                        if quota_protection_enabled
-                            && candidate.protected_models.contains(&normalized_target)
-                        {
-                            tracing::debug!(
-                                "Account {} is quota-protected for model {} [{}], skipping",
-                                candidate.email,
-                                normalized_target,
-                                target_model
-                            );
-                            continue;
-                        }
-
-                        // 【新增】主动避开限流或 5xx 锁定的账号 (高可用优化)
-                        if self
-                            .is_rate_limited(&candidate.account_id, Some(&normalized_target))
-                            .await
-                        {
-                            // Changed to account_id
-                            continue;
-                        }
-
-                        target_token = Some(candidate.clone());
-                        // 【优化】标记需要更新，稍后统一写回
-                        need_update_last_used = Some((candidate.account_id.clone(), std::time::Instant::now()));
+                    if let Some(selected) = self.select_with_p2c(
+                        &non_limited, &attempted, &normalized_target, quota_protection_enabled
+                    ) {
+                        target_token = Some(selected.clone());
+                        need_update_last_used = Some((selected.account_id.clone(), std::time::Instant::now()));
 
                         // 如果是会话首次分配且需要粘性，在此建立绑定
                         if let Some(sid) = session_id {
                             if scheduling.mode != SchedulingMode::PerformanceFirst {
                                 self.session_accounts
-                                    .insert(sid.to_string(), candidate.account_id.clone());
+                                    .insert(sid.to_string(), selected.account_id.clone());
                                 tracing::debug!(
                                     "Sticky Session: Bound new account {} to session {}",
-                                    candidate.email,
+                                    selected.email,
                                     sid
                                 );
                             }
                         }
-                        break;
                     }
                 }
             } else if target_token.is_none() {
-                // 模式 C: 纯轮询模式 (Round-robin) 或强制轮换
-                let start_idx = self.current_index.fetch_add(1, Ordering::SeqCst) % total;
+                // 模式 C: P2C 选择 (替代纯轮询)
                 tracing::debug!(
-                    "🔄 [Mode C] Round-robin from idx {}, total: {}",
-                    start_idx,
+                    "🔄 [Mode C] P2C selection from {} candidates",
                     total
                 );
-                for offset in 0..total {
-                    let idx = (start_idx + offset) % total;
-                    let candidate = &tokens_snapshot[idx];
 
-                    if attempted.contains(&candidate.account_id) {
-                        tracing::debug!(
-                            "  [{}] {} - SKIP: already attempted",
-                            idx,
-                            candidate.email
-                        );
-                        continue;
+                // 先过滤出未限流的账号
+                let mut non_limited: Vec<ProxyToken> = Vec::new();
+                for t in &tokens_snapshot {
+                    if !self.is_rate_limited(&t.account_id, Some(&normalized_target)).await {
+                        non_limited.push(t.clone());
                     }
+                }
 
-                    // 【新增 #621】模型级限流检查
-                    if quota_protection_enabled
-                        && candidate.protected_models.contains(&normalized_target)
-                    {
-                        tracing::debug!(
-                            "  ⛔ {} - SKIP: quota-protected for {} [{}]",
-                            candidate.email,
-                            normalized_target,
-                            target_model
-                        );
-                        continue;
-                    }
-
-                    // 【新增】主动避开限流或 5xx 锁定的账号
-                    if self
-                        .is_rate_limited(&candidate.account_id, Some(&normalized_target))
-                        .await
-                    {
-                        // Changed to account_id
-                        tracing::debug!("  ⏳ {} - SKIP: rate-limited", candidate.email);
-                        continue;
-                    }
-
-                    tracing::debug!("  [{}] {} - SELECTED", idx, candidate.email);
-                    target_token = Some(candidate.clone());
+                if let Some(selected) = self.select_with_p2c(
+                    &non_limited, &attempted, &normalized_target, quota_protection_enabled
+                ) {
+                    tracing::debug!("  {} - SELECTED via P2C", selected.email);
+                    target_token = Some(selected.clone());
 
                     if rotate {
-                        tracing::debug!("Force Rotation: Switched to account: {}", candidate.email);
+                        tracing::debug!("Force Rotation: Switched to account: {}", selected.email);
                     }
-                    break;
                 }
             }
 
@@ -2025,30 +2143,30 @@ impl TokenManager {
 
         let content = std::fs::read_to_string(&path)
              .map_err(|e| format!("Failed to read account file: {}", e))?;
-        
+
         let mut account: serde_json::Value = serde_json::from_str(&content)
              .map_err(|e| format!("Failed to parse account JSON: {}", e))?;
-        
+
         account["validation_blocked"] = serde_json::Value::Bool(true);
         account["validation_blocked_until"] = serde_json::Value::Number(serde_json::Number::from(block_until));
         account["validation_blocked_reason"] = serde_json::Value::String(reason.to_string());
-        
+
         // Clear sticky session if blocked
         self.session_accounts.retain(|_, v| *v != account_id);
 
         let json_str = serde_json::to_string_pretty(&account)
              .map_err(|e| format!("Failed to serialize account JSON: {}", e))?;
-             
+
         std::fs::write(&path, json_str)
              .map_err(|e| format!("Failed to write account file: {}", e))?;
-             
+
         tracing::info!(
-             "🚫 Account {} validation blocked until {} (reason: {})", 
-             account_id, 
+             "🚫 Account {} validation blocked until {} (reason: {})",
+             account_id,
              block_until,
              reason
         );
-        
+
         Ok(())
     }
 
@@ -2094,6 +2212,8 @@ mod tests {
             protected_models: HashSet::new(),
             health_score,
             reset_time,
+            validation_blocked: false,
+            validation_blocked_until: 0,
         }
     }
 
@@ -2101,11 +2221,12 @@ mod tests {
     fn compare_tokens(a: &ProxyToken, b: &ProxyToken) -> Ordering {
         const RESET_TIME_THRESHOLD_SECS: i64 = 600; // 10 分钟阈值
 
-        let tier_priority = |tier: &Option<String>| match tier.as_deref() {
-            Some("ULTRA") => 0,
-            Some("PRO") => 1,
-            Some("FREE") => 2,
-            _ => 3,
+        let tier_priority = |tier: &Option<String>| {
+            let t = tier.as_deref().unwrap_or("").to_lowercase();
+            if t.contains("ultra") { 0 }
+            else if t.contains("pro") { 1 }
+            else if t.contains("free") { 2 }
+            else { 3 }
         };
 
         // First: compare by subscription tier
@@ -2322,5 +2443,132 @@ mod tests {
         });
 
         assert!(manager.extract_earliest_reset_time(&account_no_quota).is_none());
+    }
+
+    // ===== P2C 算法测试 =====
+
+    /// 创建带 protected_models 的测试 Token
+    fn create_test_token_with_protected(
+        email: &str,
+        remaining_quota: Option<i32>,
+        protected_models: HashSet<String>,
+    ) -> ProxyToken {
+        ProxyToken {
+            account_id: email.to_string(),
+            access_token: "test_token".to_string(),
+            refresh_token: "test_refresh".to_string(),
+            expires_in: 3600,
+            timestamp: chrono::Utc::now().timestamp() + 3600,
+            email: email.to_string(),
+            account_path: PathBuf::from("/tmp/test"),
+            project_id: None,
+            subscription_tier: Some("PRO".to_string()),
+            remaining_quota,
+            protected_models,
+            health_score: 1.0,
+            reset_time: None,
+            validation_blocked: false,
+            validation_blocked_until: 0,
+        }
+    }
+
+    #[test]
+    fn test_p2c_selects_higher_quota() {
+        // P2C 应选择配额更高的账号
+        let manager = TokenManager::new(PathBuf::from("/tmp/test"));
+
+        let low_quota = create_test_token("low@test.com", Some("PRO"), 1.0, None, Some(20));
+        let high_quota = create_test_token("high@test.com", Some("PRO"), 1.0, None, Some(80));
+
+        let candidates = vec![low_quota, high_quota];
+        let attempted: HashSet<String> = HashSet::new();
+
+        // 运行多次确保选择高配额账号
+        for _ in 0..10 {
+            let result = manager.select_with_p2c(&candidates, &attempted, "claude-sonnet", false);
+            assert!(result.is_some());
+            // P2C 从两个候选中选择配额更高的
+            // 由于只有两个候选，应该总是选择 high_quota
+            assert_eq!(result.unwrap().email, "high@test.com");
+        }
+    }
+
+    #[test]
+    fn test_p2c_skips_attempted() {
+        // P2C 应跳过已尝试的账号
+        let manager = TokenManager::new(PathBuf::from("/tmp/test"));
+
+        let token_a = create_test_token("a@test.com", Some("PRO"), 1.0, None, Some(80));
+        let token_b = create_test_token("b@test.com", Some("PRO"), 1.0, None, Some(50));
+
+        let candidates = vec![token_a, token_b];
+        let mut attempted: HashSet<String> = HashSet::new();
+        attempted.insert("a@test.com".to_string());
+
+        let result = manager.select_with_p2c(&candidates, &attempted, "claude-sonnet", false);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().email, "b@test.com");
+    }
+
+    #[test]
+    fn test_p2c_skips_protected_models() {
+        // P2C 应跳过对目标模型有保护的账号 (quota_protection_enabled = true)
+        let manager = TokenManager::new(PathBuf::from("/tmp/test"));
+
+        let mut protected = HashSet::new();
+        protected.insert("claude-sonnet".to_string());
+
+        let protected_account = create_test_token_with_protected("protected@test.com", Some(90), protected);
+        let normal_account = create_test_token_with_protected("normal@test.com", Some(50), HashSet::new());
+
+        let candidates = vec![protected_account, normal_account];
+        let attempted: HashSet<String> = HashSet::new();
+
+        let result = manager.select_with_p2c(&candidates, &attempted, "claude-sonnet", true);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().email, "normal@test.com");
+    }
+
+    #[test]
+    fn test_p2c_single_candidate() {
+        // 单候选时直接返回
+        let manager = TokenManager::new(PathBuf::from("/tmp/test"));
+
+        let token = create_test_token("single@test.com", Some("PRO"), 1.0, None, Some(50));
+        let candidates = vec![token];
+        let attempted: HashSet<String> = HashSet::new();
+
+        let result = manager.select_with_p2c(&candidates, &attempted, "claude-sonnet", false);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().email, "single@test.com");
+    }
+
+    #[test]
+    fn test_p2c_empty_candidates() {
+        // 空候选返回 None
+        let manager = TokenManager::new(PathBuf::from("/tmp/test"));
+
+        let candidates: Vec<ProxyToken> = vec![];
+        let attempted: HashSet<String> = HashSet::new();
+
+        let result = manager.select_with_p2c(&candidates, &attempted, "claude-sonnet", false);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_p2c_all_attempted() {
+        // 所有账号都已尝试时返回 None
+        let manager = TokenManager::new(PathBuf::from("/tmp/test"));
+
+        let token_a = create_test_token("a@test.com", Some("PRO"), 1.0, None, Some(80));
+        let token_b = create_test_token("b@test.com", Some("PRO"), 1.0, None, Some(50));
+
+        let candidates = vec![token_a, token_b];
+        let mut attempted: HashSet<String> = HashSet::new();
+        attempted.insert("a@test.com".to_string());
+        attempted.insert("b@test.com".to_string());
+
+        let result = manager.select_with_p2c(&candidates, &attempted, "claude-sonnet", false);
+        assert!(result.is_none());
     }
 }

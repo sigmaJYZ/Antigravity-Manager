@@ -55,7 +55,7 @@ dependencies = [
 
 [[package]]
 name = "antigravity_tools"
-version = "4.0.11"
+version = "4.0.12"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -96,6 +96,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "toml 0.8.23",
  "toml_edit 0.22.27",
  "tower 0.4.13",

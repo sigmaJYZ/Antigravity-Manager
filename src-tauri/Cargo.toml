@@ -69,6 +69,7 @@ toml = "0.8"
 toml_edit = "0.22"
 tauri-plugin-window-state = "2"
 parking_lot = "0.12.5"
+tokio-util = "0.7.18"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"

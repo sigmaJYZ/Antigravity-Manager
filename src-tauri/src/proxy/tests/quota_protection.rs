@@ -34,6 +34,9 @@ mod tests {
             remaining_quota,
             protected_models: protected_models.iter().map(|s| s.to_string()).collect(),
             health_score: 1.0,
+            reset_time: None,
+            validation_blocked: false,
+            validation_blocked_until: 0,
         }
     }
 
@@ -911,5 +914,229 @@ mod tests {
             .count();
 
         assert_eq!(quota_protected_count, 1);
+    }
+
+    // ==================================================================================
+    // 测试 17: get_model_quota_from_json 函数正确性
+    // 验证从磁盘读取特定模型 quota 而非 max(所有模型)
+    // ==================================================================================
+
+    #[test]
+    fn test_get_model_quota_from_json_reads_correct_model() {
+        // 创建模拟账号 JSON 文件，包含多个模型的 quota
+        let account_json = serde_json::json!({
+            "email": "test@example.com",
+            "quota": {
+                "models": [
+                    { "name": "claude-sonnet-4-5", "percentage": 60 },
+                    { "name": "claude-opus-4-5-thinking", "percentage": 40 },
+                    { "name": "gemini-3-flash", "percentage": 100 }
+                ]
+            }
+        });
+
+        // 使用 std::env::temp_dir() 创建临时文件
+        let temp_dir = std::env::temp_dir();
+        let account_path = temp_dir.join(format!("test_quota_{}.json", uuid::Uuid::new_v4()));
+        std::fs::write(&account_path, account_json.to_string()).expect("Failed to write temp file");
+
+        // 测试读取 claude-sonnet-4-5 的 quota
+        let sonnet_quota =
+            crate::proxy::token_manager::TokenManager::get_model_quota_from_json_for_test(
+                &account_path,
+                "claude-sonnet-4-5",
+            );
+        assert_eq!(
+            sonnet_quota,
+            Some(60),
+            "claude-sonnet-4-5 应该返回 60%，而非 max(100%)"
+        );
+
+        // 测试读取 gemini-3-flash 的 quota
+        let gemini_quota =
+            crate::proxy::token_manager::TokenManager::get_model_quota_from_json_for_test(
+                &account_path,
+                "gemini-3-flash",
+            );
+        assert_eq!(gemini_quota, Some(100), "gemini-3-flash 应该返回 100%");
+
+        // 测试读取不存在的模型
+        let unknown_quota =
+            crate::proxy::token_manager::TokenManager::get_model_quota_from_json_for_test(
+                &account_path,
+                "unknown-model",
+            );
+        assert_eq!(unknown_quota, None, "不存在的模型应该返回 None");
+
+        // 清理临时文件
+        let _ = std::fs::remove_file(&account_path);
+    }
+
+    // ==================================================================================
+    // 测试 18: 排序使用目标模型 quota 而非 max quota
+    // 验证修复后的排序逻辑正确性
+    // ==================================================================================
+
+    #[test]
+    fn test_sorting_uses_target_model_quota_not_max() {
+        // 使用 std::env::temp_dir() 创建临时目录
+        let temp_dir = std::env::temp_dir().join(format!("test_sorting_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
+
+        // 账号 A: max=100 (gemini), sonnet=40
+        let account_a_json = serde_json::json!({
+            "email": "carmelioventori@example.com",
+            "quota": {
+                "models": [
+                    { "name": "claude-sonnet-4-5", "percentage": 40 },
+                    { "name": "gemini-3-flash", "percentage": 100 }
+                ]
+            }
+        });
+
+        // 账号 B: max=100 (gemini), sonnet=100
+        let account_b_json = serde_json::json!({
+            "email": "kiriyamaleo@example.com",
+            "quota": {
+                "models": [
+                    { "name": "claude-sonnet-4-5", "percentage": 100 },
+                    { "name": "gemini-3-flash", "percentage": 100 }
+                ]
+            }
+        });
+
+        // 账号 C: max=100 (gemini), sonnet=60
+        let account_c_json = serde_json::json!({
+            "email": "mizusawakai9@example.com",
+            "quota": {
+                "models": [
+                    { "name": "claude-sonnet-4-5", "percentage": 60 },
+                    { "name": "gemini-3-flash", "percentage": 100 }
+                ]
+            }
+        });
+
+        // 写入临时文件
+        let path_a = temp_dir.join("account_a.json");
+        let path_b = temp_dir.join("account_b.json");
+        let path_c = temp_dir.join("account_c.json");
+
+        std::fs::write(&path_a, account_a_json.to_string()).unwrap();
+        std::fs::write(&path_b, account_b_json.to_string()).unwrap();
+        std::fs::write(&path_c, account_c_json.to_string()).unwrap();
+
+        // 创建 tokens，remaining_quota 使用 max 值（模拟旧逻辑）
+        let mut tokens = vec![
+            create_mock_token_with_path("a", "carmelioventori@example.com", vec![], Some(100), path_a.clone()),
+            create_mock_token_with_path("b", "kiriyamaleo@example.com", vec![], Some(100), path_b.clone()),
+            create_mock_token_with_path("c", "mizusawakai9@example.com", vec![], Some(100), path_c.clone()),
+        ];
+
+        // 目标模型: claude-sonnet-4-5
+        let target_model = "claude-sonnet-4-5";
+
+        // 使用修复后的排序逻辑：读取目标模型的 quota
+        tokens.sort_by(|a, b| {
+            let quota_a = crate::proxy::token_manager::TokenManager::get_model_quota_from_json_for_test(
+                &a.account_path,
+                target_model,
+            )
+            .unwrap_or(0);
+            let quota_b = crate::proxy::token_manager::TokenManager::get_model_quota_from_json_for_test(
+                &b.account_path,
+                target_model,
+            )
+            .unwrap_or(0);
+            quota_b.cmp(&quota_a) // 高 quota 优先
+        });
+
+        // 验证排序结果：sonnet quota 100% > 60% > 40%
+        assert_eq!(
+            tokens[0].email, "kiriyamaleo@example.com",
+            "sonnet=100% 的账号应该排第一"
+        );
+        assert_eq!(
+            tokens[1].email, "mizusawakai9@example.com",
+            "sonnet=60% 的账号应该排第二"
+        );
+        assert_eq!(
+            tokens[2].email, "carmelioventori@example.com",
+            "sonnet=40% 的账号应该排第三"
+        );
+
+        // 清理临时目录
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    // ==================================================================================
+    // 测试 19: 模型名称归一化后的 quota 匹配
+    // 验证请求 claude-opus-4-5-thinking 时能正确匹配 claude-sonnet-4-5 的 quota
+    // ==================================================================================
+
+    #[test]
+    fn test_quota_matching_with_normalized_model_name() {
+        // 账号 JSON：只记录标准化后的模型名
+        let account_json = serde_json::json!({
+            "email": "test@example.com",
+            "quota": {
+                "models": [
+                    { "name": "claude-sonnet-4-5", "percentage": 75 },
+                    { "name": "gemini-3-flash", "percentage": 90 }
+                ]
+            }
+        });
+
+        let temp_dir = std::env::temp_dir();
+        let account_path = temp_dir.join(format!("test_normalized_{}.json", uuid::Uuid::new_v4()));
+        std::fs::write(&account_path, account_json.to_string()).expect("Failed to write temp file");
+
+        // 请求 claude-opus-4-5-thinking，应该归一化为 claude-sonnet-4-5
+        let request_model = "claude-opus-4-5-thinking";
+        let normalized = normalize_to_standard_id(request_model)
+            .unwrap_or_else(|| request_model.to_string());
+
+        assert_eq!(normalized, "claude-sonnet-4-5", "应该归一化为 claude-sonnet-4-5");
+
+        // 读取归一化后模型的 quota
+        let quota = crate::proxy::token_manager::TokenManager::get_model_quota_from_json_for_test(
+            &account_path,
+            &normalized,
+        );
+
+        assert_eq!(
+            quota,
+            Some(75),
+            "claude-opus-4-5-thinking 归一化后应该读取 claude-sonnet-4-5 的 quota (75%)"
+        );
+
+        // 清理临时文件
+        let _ = std::fs::remove_file(&account_path);
+    }
+
+    /// 辅助函数：创建带有自定义 account_path 的 mock token
+    fn create_mock_token_with_path(
+        account_id: &str,
+        email: &str,
+        protected_models: Vec<&str>,
+        remaining_quota: Option<i32>,
+        account_path: PathBuf,
+    ) -> ProxyToken {
+        ProxyToken {
+            account_id: account_id.to_string(),
+            access_token: format!("mock_access_token_{}", account_id),
+            refresh_token: format!("mock_refresh_token_{}", account_id),
+            expires_in: 3600,
+            timestamp: chrono::Utc::now().timestamp() + 3600,
+            email: email.to_string(),
+            account_path,
+            project_id: Some("test-project".to_string()),
+            subscription_tier: Some("PRO".to_string()),
+            remaining_quota,
+            protected_models: protected_models.iter().map(|s| s.to_string()).collect(),
+            health_score: 1.0,
+            reset_time: None,
+            validation_blocked: false,
+            validation_blocked_until: 0,
+        }
     }
 }

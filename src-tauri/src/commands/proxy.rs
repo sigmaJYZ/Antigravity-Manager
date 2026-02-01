@@ -112,9 +112,9 @@ pub async fn internal_start_proxy_service(
             monitor.set_enabled(config.enable_logging);
         }
     }
-    
+
     let _monitor = state.monitor.read().await.as_ref().unwrap().clone();
-    
+
     // 檢查並啟動管理服務器（如果尚未運行）
     ensure_admin_server(config.clone(), state, integration.clone(), cloudflared_state.clone()).await?;
 
@@ -123,11 +123,11 @@ pub async fn internal_start_proxy_service(
         let admin_lock = state.admin_server.read().await;
         admin_lock.as_ref().unwrap().axum_server.token_manager.clone()
     };
-    
+
     // 同步配置到运行中的 TokenManager
-    token_manager.start_auto_cleanup();
+    token_manager.start_auto_cleanup().await;
     token_manager.update_sticky_config(config.scheduling.clone()).await;
-    
+
     // [NEW] 加载熔断配置 (从主配置加载)
     let app_config = crate::modules::config::load_app_config().unwrap_or_else(|_| crate::models::AppConfig::new());
     token_manager.update_circuit_breaker_config(app_config.circuit_breaker).await;
@@ -141,7 +141,7 @@ pub async fn internal_start_proxy_service(
     // 3. 加載賬號
     let active_accounts = token_manager.load_accounts().await
         .unwrap_or(0);
-    
+
     if active_accounts == 0 {
         let zai_enabled = config.zai.enabled
             && !matches!(config.zai.dispatch_mode, crate::proxy::ZaiDispatchMode::Off);
@@ -159,7 +159,7 @@ pub async fn internal_start_proxy_service(
     let mut instance_lock = state.instance.write().await;
     let admin_lock = state.admin_server.read().await;
     let axum_server = admin_lock.as_ref().unwrap().axum_server.clone();
-    
+
     // 创建服务实例（逻辑启动）
     let instance = ProxyServiceInstance {
         config: config.clone(),
@@ -167,12 +167,12 @@ pub async fn internal_start_proxy_service(
         axum_server: axum_server.clone(),
         server_handle: tokio::spawn(async {}), // 逻辑上的 handle
     };
-    
+
     // [FIX] Ensure the server is logically running
     axum_server.set_running(true).await;
-    
+
     *instance_lock = Some(instance);
-    
+
     // 成功启动后，guard 在这里结束并重置 starting 是 OK 的
     // 但其实我们可以直接手动掉，或者相信 guard
     Ok(ProxyStatus {
@@ -250,17 +250,18 @@ pub async fn stop_proxy_service(
     state: State<'_, ProxyServiceState>,
 ) -> Result<(), String> {
     let mut instance_lock = state.instance.write().await;
-    
+
     if instance_lock.is_none() {
         return Err("服务未运行".to_string());
     }
-    
+
     // 停止 Axum 服务器 (仅逻辑停止，不杀死进程)
     if let Some(instance) = instance_lock.take() {
+        instance.token_manager.abort_background_tasks().await;
         instance.axum_server.set_running(false).await;
         // 已移除 instance.axum_server.stop() 调用，防止杀死 Admin Server
     }
-    
+
     Ok(())
 }
 
@@ -281,7 +282,7 @@ pub async fn get_proxy_status(
 
     // 使用 try_read 避免在该命令中产生产生排队延迟
     let lock_res = state.instance.try_read();
-    
+
     match lock_res {
         Ok(instance_lock) => {
             match instance_lock.as_ref() {
@@ -396,13 +397,13 @@ pub async fn export_proxy_logs(
 ) -> Result<usize, String> {
     let logs = crate::modules::proxy_db::get_all_logs_for_export()?;
     let count = logs.len();
-    
+
     let json = serde_json::to_string_pretty(&logs)
         .map_err(|e| format!("Failed to serialize logs: {}", e))?;
-    
+
     std::fs::write(&file_path, json)
         .map_err(|e| format!("Failed to write file: {}", e))?;
-    
+
     Ok(count)
 }
 
@@ -416,14 +417,14 @@ pub async fn export_proxy_logs_json(
     let logs: Vec<serde_json::Value> = serde_json::from_str(&json_data)
         .map_err(|e| format!("Failed to parse JSON: {}", e))?;
     let count = logs.len();
-    
+
     // Pretty print
     let pretty_json = serde_json::to_string_pretty(&logs)
         .map_err(|e| format!("Failed to serialize: {}", e))?;
-    
+
     std::fs::write(&file_path, pretty_json)
         .map_err(|e| format!("Failed to write file: {}", e))?;
-    
+
     Ok(count)
 }
 
@@ -482,19 +483,19 @@ pub async fn update_model_mapping(
     state: State<'_, ProxyServiceState>,
 ) -> Result<(), String> {
     let instance_lock = state.instance.read().await;
-    
-    // 1. 如果服务正在运行，立即更新内存中的映射 (这里目前只更新了 anthropic_mapping 的 RwLock, 
+
+    // 1. 如果服务正在运行，立即更新内存中的映射 (这里目前只更新了 anthropic_mapping 的 RwLock,
     // 后续可以根据需要让 resolve_model_route 直接读取全量 config)
     if let Some(instance) = instance_lock.as_ref() {
         instance.axum_server.update_mapping(&config).await;
         tracing::debug!("后端服务已接收全量模型映射配置");
     }
-    
+
     // 2. 无论是否运行，都保存到全局配置持久化
     let mut app_config = crate::modules::config::load_app_config().map_err(|e| e)?;
     app_config.proxy.custom_mapping = config.custom_mapping;
     crate::modules::config::save_app_config(&app_config).map_err(|e| e)?;
-    
+
     Ok(())
 }
 
