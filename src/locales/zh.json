@@ -75,7 +75,8 @@
         "switch_to_spanish": "切换到西班牙语",
         "switch_to_spanish_short": "ES",
         "switch_to_malay": "切换到马来语",
-        "switch_to_malay_short": "MY"
+        "switch_to_malay_short": "MY",
+        "logout": "登出"
     },
     "dashboard": {
         "hello": "你好, 用户 👋",
@@ -118,6 +119,9 @@
         "ultra": "ULTRA",
         "pro": "PRO",
         "free": "FREE",
+        "edit_label": "编辑标签",
+        "custom_label_placeholder": "输入自定义标签",
+        "label_updated": "标签已更新",
         "add_account": "添加账号",
         "refresh_all": "刷新所有",
         "refresh_selected": "刷新 ({{count}})",
@@ -699,6 +703,35 @@
                 "context_compression_threshold_l2_tooltip": "压缩早期的思维链内容，保留签名。建议值: 0.55 (55%)",
                 "context_compression_threshold_l3": "L3 压缩阈值 (摘要重置)",
                 "context_compression_threshold_l3_tooltip": "强制生成 XML 状态摘要并重置会话。这是最省 token 的手段。建议值: 0.7 (70%)"
+            },
+            "opencode_sync": {
+                "card_title": "OpenCode",
+                "status": {
+                    "detecting": "检测中...",
+                    "installed": "已安装 ({{version}})",
+                    "not_installed": "未安装",
+                    "synced": "已同步",
+                    "not_synced": "未同步",
+                    "current_base_url": "当前接口地址 (BASE URL)"
+                },
+                "sync_accounts": "同步账号到 antigravity-accounts.json",
+                "btn_sync": "立即同步配置",
+                "btn_view": "查看配置",
+                "btn_restore": "还原配置",
+                "btn_restore_backup": "从备份还原",
+                "toast": {
+                    "config_missing": "请先生成 API Key 并启动服务",
+                    "sync_success": "OpenCode 配置同步成功",
+                    "sync_error": "OpenCode 同步失败: {{error}}"
+                },
+                "modal": {
+                    "view_title": "OpenCode 配置文件预览",
+                    "copy_success": "配置已复制"
+                },
+                "sync_confirm_title": "确认同步",
+                "sync_confirm_message": "将根据当前反代设置覆盖 OpenCode 配置。确定继续？",
+                "restore_confirm": "确定要将 OpenCode 还原为默认配置吗？",
+                "restore_backup_confirm": "确定要从备份还原 OpenCode 配置吗？"
             }
         },
         "cloudflared": {
@@ -1017,6 +1050,9 @@
         "desc": "当前运行在 Web 模式下，请输入管理密码或 API Key 以进入后台。",
         "placeholder": "请输入管理密码或 API Key",
         "btn_login": "验证并进入",
+        "btn_verifying": "验证中...",
+        "error_invalid_key": "密码或 API Key 错误，请重试",
+        "error_network": "网络连接失败，请检查服务是否正常运行",
         "note": "注意：如果设置了独立的管理密码，请输入管理密码；否则请输入 API_KEY。",
         "lookup_hint": "如果您忘记了，请运行 docker logs antigravity-manager 寻找 Current API Key 或 Web UI Password",
         "config_hint": "或执行 grep -E '\"api_key\"|\"admin_password\"' ~/.antigravity_tools/gui_config.json 查看。"

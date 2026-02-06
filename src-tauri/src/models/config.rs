@@ -25,6 +25,8 @@ pub struct AppConfig {
     pub pinned_quota_models: PinnedQuotaModelsConfig, // [NEW] Pinned quota models list
     #[serde(default)]
     pub circuit_breaker: CircuitBreakerConfig, // [NEW] Circuit breaker configuration
+    #[serde(default)]
+    pub hidden_menu_items: Vec<String>, // Hidden menu item path list
 }
 
 /// Scheduled warmup configuration
@@ -181,6 +183,7 @@ impl AppConfig {
             quota_protection: QuotaProtectionConfig::default(),
             pinned_quota_models: PinnedQuotaModelsConfig::default(),
             circuit_breaker: CircuitBreakerConfig::default(),
+            hidden_menu_items: Vec::new(),
         }
     }
 }

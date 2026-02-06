@@ -190,3 +190,8 @@ export async function exportAccounts(accountIds: string[]): Promise<ExportAccoun
     return await invoke('export_accounts', { accountIds });
 }
 
+// 自定义标签相关
+export async function updateAccountLabel(accountId: string, label: string): Promise<void> {
+    return await invoke('update_account_label', { accountId, label });
+}
+

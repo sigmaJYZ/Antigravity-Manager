@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { NavigationDropdown } from './NavDropdowns';
 import { isActive, getCurrentNavItem, type NavItem } from './constants';
+import { useConfigStore } from '../../stores/useConfigStore';
 
 interface NavMenuProps {
     navItems: NavItem[];
@@ -18,12 +19,16 @@ interface NavMenuProps {
  */
 export function NavMenu({ navItems }: NavMenuProps) {
     const location = useLocation();
+    const { isMenuItemHidden } = useConfigStore();
+
+    // 过滤隐藏的菜单项
+    const visibleNavItems = navItems.filter(item => !isMenuItemHidden(item.path));
 
     return (
         <>
             {/* 文字胶囊 (≥ 1024px) */}
             <nav className="hidden lg:flex items-center gap-1 bg-gray-100 dark:bg-base-200 rounded-full p-1">
-                {navItems.map((item) => (
+                {visibleNavItems.map((item) => (
                     <Link
                         key={item.path}
                         to={item.path}
@@ -48,7 +53,7 @@ export function NavMenu({ navItems }: NavMenuProps) {
 
             {/* 图标胶囊 (820px - 1024px) - Logo 不显示文字 */}
             <nav className="hidden min-[820px]:flex lg:hidden items-center gap-1 bg-gray-100 dark:bg-base-200 rounded-full p-1">
-                {navItems.map((item) => (
+                {visibleNavItems.map((item) => (
                     <Link
                         key={item.path}
                         to={item.path}
@@ -70,7 +75,7 @@ export function NavMenu({ navItems }: NavMenuProps) {
 
             {/* 图标胶囊 (640px - 820px) - Logo 显示文字 */}
             <nav className="hidden min-[640px]:flex min-[820px]:hidden items-center gap-1 bg-gray-100 dark:bg-base-200 rounded-full p-1">
-                {navItems.map((item) => (
+                {visibleNavItems.map((item) => (
                     <Link
                         key={item.path}
                         to={item.path}
@@ -92,7 +97,7 @@ export function NavMenu({ navItems }: NavMenuProps) {
 
             {/* 图标胶囊 (480px - 640px) - Logo 隐藏文字 */}
             <nav className="hidden min-[480px]:flex min-[640px]:hidden items-center gap-1 bg-gray-100 dark:bg-base-200 rounded-full p-1">
-                {navItems.map((item) => (
+                {visibleNavItems.map((item) => (
                     <Link
                         key={item.path}
                         to={item.path}
@@ -115,9 +120,9 @@ export function NavMenu({ navItems }: NavMenuProps) {
             {/* 图标+文字下拉 (375px - 480px) */}
             <div className="hidden min-[375px]:block min-[480px]:hidden">
                 <NavigationDropdown
-                    navItems={navItems}
+                    navItems={visibleNavItems}
                     isActive={(path) => isActive(location.pathname, path)}
-                    getCurrentNavItem={() => getCurrentNavItem(location.pathname, navItems)}
+                    getCurrentNavItem={() => getCurrentNavItem(location.pathname, visibleNavItems)}
                     onNavigate={() => { }}
                     showLabel={true}
                 />
@@ -126,9 +131,9 @@ export function NavMenu({ navItems }: NavMenuProps) {
             {/* 图标下拉 (< 375px) */}
             <div className="min-[375px]:hidden">
                 <NavigationDropdown
-                    navItems={navItems}
+                    navItems={visibleNavItems}
                     isActive={(path) => isActive(location.pathname, path)}
-                    getCurrentNavItem={() => getCurrentNavItem(location.pathname, navItems)}
+                    getCurrentNavItem={() => getCurrentNavItem(location.pathname, visibleNavItems)}
                     onNavigate={() => { }}
                     showLabel={false}
                 />

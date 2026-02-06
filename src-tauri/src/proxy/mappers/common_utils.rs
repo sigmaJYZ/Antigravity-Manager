@@ -472,7 +472,7 @@ mod tests {
     #[test]
     fn test_high_quality_model_auto_grounding() {
         // Auto-grounding is currently disabled by default due to conflict with image gen
-        let config = resolve_request_config("gpt-4o", "gemini-2.5-flash", &None, None, None);
+        let config = resolve_request_config("gpt-4o", "gemini-2.5-flash", &None, None, None, None);
         assert_eq!(config.request_type, "agent");
         assert!(!config.inject_google_search);
     }
@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn test_online_suffix_force_grounding() {
         let config =
-            resolve_request_config("gemini-3-flash-online", "gemini-3-flash", &None, None, None);
+            resolve_request_config("gemini-3-flash-online", "gemini-3-flash", &None, None, None, None);
         assert_eq!(config.request_type, "web_search");
         assert!(config.inject_google_search);
         assert_eq!(config.final_model, "gemini-2.5-flash");
@@ -498,7 +498,7 @@ mod tests {
 
     #[test]
     fn test_default_no_grounding() {
-        let config = resolve_request_config("claude-sonnet", "gemini-3-flash", &None, None, None);
+        let config = resolve_request_config("claude-sonnet", "gemini-3-flash", &None, None, None, None);
         assert_eq!(config.request_type, "agent");
         assert!(!config.inject_google_search);
     }
@@ -509,6 +509,7 @@ mod tests {
             "gemini-3-pro-image",
             "gemini-3-pro-image",
             &None,
+            None,
             None,
             None,
         );

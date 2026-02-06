@@ -14,6 +14,8 @@ interface ConfigState {
     updateLanguage: (language: string) => Promise<void>;
     toggleShowAllQuotas: () => void;
     showAllQuotas: boolean;
+    toggleMenuItem: (path: string) => Promise<void>;
+    isMenuItemHidden: (path: string) => boolean;
 }
 
 export const useConfigStore = create<ConfigState>((set, get) => ({
@@ -70,5 +72,26 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
         const next = !current;
         localStorage.setItem('antigravity_show_all_quotas', String(next));
         set({ showAllQuotas: next });
+    },
+
+    toggleMenuItem: async (path: string) => {
+        const { config } = get();
+        if (!config) return;
+
+        const hiddenItems = config.hidden_menu_items || [];
+        const isHidden = hiddenItems.includes(path);
+
+        const newHiddenItems = isHidden
+            ? hiddenItems.filter(item => item !== path)
+            : [...hiddenItems, path];
+
+        const newConfig = { ...config, hidden_menu_items: newHiddenItems };
+        await get().saveConfig(newConfig, true);
+    },
+
+    isMenuItemHidden: (path: string) => {
+        const { config } = get();
+        if (!config) return false;
+        return (config.hidden_menu_items || []).includes(path);
     },
 }));

@@ -9,13 +9,7 @@ use std::sync::{Mutex, OnceLock};
 use tracing::debug;
 use uuid::Uuid;
 
-// === 全局 ThoughtSignature 存储 ===
-// 用于在流式响应和后续请求之间传递签名，避免嵌入到用户可见的文本中
-static GLOBAL_THOUGHT_SIG: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
-fn get_thought_sig_storage() -> &'static Mutex<Option<String>> {
-    GLOBAL_THOUGHT_SIG.get_or_init(|| Mutex::new(None))
-}
 
 /// 保存 thoughtSignature 到会话缓存
 pub fn store_thought_signature(sig: &str, session_id: &str, message_count: usize) {
@@ -23,16 +17,7 @@ pub fn store_thought_signature(sig: &str, session_id: &str, message_count: usize
         return;
     }
 
-    // 1. 存储到全局存储 (保持向后兼容)
-    if let Ok(mut guard) = get_thought_sig_storage().lock() {
-        let should_store = match &*guard {
-            None => true,
-            Some(existing) => sig.len() > existing.len(),
-        };
-        if should_store {
-            *guard = Some(sig.to_string());
-        }
-    }
+
 
     // 2. [CRITICAL] 存储到 Session 隔离缓存 (对齐 Claude 协议)
     crate::proxy::SignatureCache::global().cache_session_signature(session_id, sig.to_string(), message_count);
@@ -45,15 +30,7 @@ pub fn store_thought_signature(sig: &str, session_id: &str, message_count: usize
     );
 }
 
-/// 获取全局存储的 thoughtSignature（不清除）
-#[allow(dead_code)]
-pub fn get_thought_signature() -> Option<String> {
-    if let Ok(guard) = get_thought_sig_storage().lock() {
-        guard.clone()
-    } else {
-        None
-    }
-}
+
 
 /// Extract and convert Gemini usageMetadata to OpenAI usage format
 fn extract_usage_metadata(u: &Value) -> Option<super::models::OpenAIUsage> {

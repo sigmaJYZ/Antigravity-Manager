@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Github, User, MessageCircle, ExternalLink, RefreshCw, Heart, Coffee } from 'lucide-react';
+import { Save, Github, User, MessageCircle, ExternalLink, RefreshCw, Heart, Coffee, LayoutDashboard, Users, Network, Activity, BarChart3, Settings as SettingsIcon, Lock, CheckCircle2 } from 'lucide-react';
 import { request as invoke } from '../utils/request';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useConfigStore } from '../stores/useConfigStore';
@@ -69,6 +69,7 @@ function Settings() {
             enabled: false,
             backoff_steps: [30, 60, 120, 300, 600]
         },
+        hidden_menu_items: [],  // 菜单显示设置：默认不隐藏任何菜单项
 
     });
 
@@ -526,6 +527,101 @@ function Settings() {
                                         <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">{t('settings.general.update_check_interval_desc')}</p>
                                     </div>
                                 )}
+
+                                {/* 菜单显示设置 */}
+                                <div className="border-t border-gray-200 dark:border-base-200 pt-6 mt-6">
+                                    <h3 className="font-medium text-gray-900 dark:text-base-content mb-3">菜单显示设置</h3>
+                                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                                        选择要在菜单栏中显示的功能项。隐藏不常用的菜单可以节省空间。
+                                    </p>
+                                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                                        {[
+                                            { path: '/', label: t('nav.dashboard'), icon: LayoutDashboard },
+                                            { path: '/accounts', label: t('nav.accounts'), icon: Users },
+                                            { path: '/api-proxy', label: t('nav.proxy'), icon: Network },
+                                            { path: '/monitor', label: t('nav.call_records'), icon: Activity },
+                                            { path: '/token-stats', label: t('nav.token_stats', 'Token 统计'), icon: BarChart3 },
+                                            { path: '/user-token', label: t('nav.user_token', 'User Tokens'), icon: Users },
+                                            { path: '/security', label: t('nav.security'), icon: Lock },
+                                            { path: '/settings', label: t('nav.settings'), icon: SettingsIcon },
+                                        ].map((item) => {
+                                            const hiddenItems = formData.hidden_menu_items || [];
+                                            const isVisible = !hiddenItems.includes(item.path);
+                                            const isSettings = item.path === '/settings';
+
+                                            return (
+                                                <div
+                                                    key={item.path}
+                                                    onClick={async () => {
+                                                        if (!isSettings) {
+                                                            const originalConfig = { ...formData };
+                                                            const hiddenItems = formData.hidden_menu_items || [];
+                                                            const newHiddenItems = isVisible
+                                                                ? [...hiddenItems, item.path]
+                                                                : hiddenItems.filter(p => p !== item.path);
+
+                                                            // 乐观更新 UI
+                                                            const newConfig = {
+                                                                ...formData,
+                                                                hidden_menu_items: newHiddenItems
+                                                            };
+                                                            setFormData(newConfig);
+
+                                                            // 尝试保存
+                                                            try {
+                                                                await saveConfig(newConfig);
+                                                            } catch (error) {
+                                                                // 保存失败，回滚到原始快照
+                                                                setFormData(originalConfig);
+                                                                showToast(`保存失败，已恢复设置: ${error}`, 'error');
+                                                            }
+                                                        }
+                                                    }}
+                                                    className={`
+                                                        relative flex flex-col items-center justify-center gap-3 p-4 rounded-xl border-2 transition-all cursor-pointer select-none
+                                                        ${isSettings
+                                                            ? 'bg-gray-50 dark:bg-base-200 border-gray-100 dark:border-base-300 opacity-60 cursor-not-allowed'
+                                                            : isVisible
+                                                                ? 'bg-blue-50/50 dark:bg-blue-900/10 border-blue-500 dark:border-blue-500 shadow-sm'
+                                                                : 'bg-white dark:bg-base-100 border-gray-200 dark:border-base-300 hover:border-gray-300 dark:hover:border-base-content/20 text-gray-500'
+                                                        }
+                                                    `}
+                                                >
+                                                    {/* 选中标记 */}
+                                                    {isVisible && (
+                                                        <div className="absolute top-2 right-2 text-blue-500">
+                                                            <CheckCircle2 size={16} fill="currentColor" className="text-white dark:text-base-100" />
+                                                        </div>
+                                                    )}
+
+                                                    {isSettings && (
+                                                        <div className="absolute top-2 right-2 text-xs font-bold text-gray-400 bg-gray-200 dark:bg-base-300 px-1.5 py-0.5 rounded">
+                                                            必选
+                                                        </div>
+                                                    )}
+
+                                                    <div className={`
+                                                        p-3 rounded-xl transition-colors
+                                                        ${isVisible
+                                                            ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                                                            : 'bg-gray-100 dark:bg-base-200 text-gray-400 dark:text-base-content/50'
+                                                        }
+                                                    `}>
+                                                        <item.icon size={24} />
+                                                    </div>
+
+                                                    <span className={`font-medium text-sm ${isVisible ? 'text-blue-900 dark:text-blue-100' : 'text-gray-500'}`}>
+                                                        {item.label}
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-4 flex items-center gap-1.5">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-gray-400"></div>
+                                        被选中的项目将显示在顶部菜单栏中
+                                    </p>
+                                </div>
                             </>
                         </div>
                     )}
@@ -1018,7 +1114,7 @@ function Settings() {
                                     <div>
                                         <h3 className="text-3xl font-black text-gray-900 dark:text-base-content tracking-tight mb-2">Antigravity Tools</h3>
                                         <div className="flex items-center justify-center gap-2 text-sm">
-                                            v4.1.4
+                                            v4.1.7
                                             <span className="text-gray-400 dark:text-gray-600">•</span>
                                             <span className="text-gray-500 dark:text-gray-400">{t('settings.branding.subtitle')}</span>
                                         </div>

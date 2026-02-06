@@ -88,9 +88,13 @@ impl ProxyPoolManager {
                 let res = self.select_proxy_from_pool(&config).await.ok().flatten();
                 if let Some(ref p) = res {
                     tracing::info!("[Proxy] Route: Generic Request -> Proxy {} (Pool)", p.entry_id);
+                } else {
+                    // [FIX #1583] 明确记录池中无可用代理的情况
+                    tracing::warn!("[Proxy] Route: Generic Request -> No available proxy in pool, falling back to upstream or direct");
                 }
                 res
             } else {
+                tracing::debug!("[Proxy] Route: Generic Request -> Proxy pool disabled");
                 None
             }
         };

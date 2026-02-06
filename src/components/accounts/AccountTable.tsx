@@ -38,6 +38,9 @@ import {
     ToggleLeft,
     ToggleRight,
     Sparkles,
+    Tag,
+    X,
+    Check,
 } from 'lucide-react';
 import { Account } from '../../types/account';
 import { useTranslation } from 'react-i18next';
@@ -67,6 +70,7 @@ interface AccountTableProps {
     onDelete: (accountId: string) => void;
     onToggleProxy: (accountId: string) => void;
     onWarmup?: (accountId: string) => void;
+    onUpdateLabel?: (accountId: string, label: string) => void;
     /** 拖拽排序回调，当用户完成拖拽时触发 */
     onReorder?: (accountIds: string[]) => void;
 }
@@ -87,6 +91,7 @@ interface SortableRowProps {
     onDelete: () => void;
     onToggleProxy: () => void;
     onWarmup?: () => void;
+    onUpdateLabel?: (label: string) => void;
 }
 
 interface AccountRowContentProps {
@@ -102,6 +107,7 @@ interface AccountRowContentProps {
     onDelete: () => void;
     onToggleProxy: () => void;
     onWarmup?: () => void;
+    onUpdateLabel?: (label: string) => void;
 }
 
 // ============================================================================
@@ -187,6 +193,7 @@ function SortableAccountRow({
     onDelete,
     onToggleProxy,
     onWarmup,
+    onUpdateLabel,
 }: SortableRowProps) {
     const { t } = useTranslation();
     const {
@@ -250,6 +257,7 @@ function SortableAccountRow({
                 onDelete={onDelete}
                 onToggleProxy={onToggleProxy}
                 onWarmup={onWarmup}
+                onUpdateLabel={onUpdateLabel}
             />
         </tr>
     );
@@ -272,9 +280,34 @@ function AccountRowContent({
     onDelete,
     onToggleProxy,
     onWarmup,
+    onUpdateLabel,
 }: AccountRowContentProps) {
     const { t } = useTranslation();
     const { config, showAllQuotas } = useConfigStore();
+
+    // 自定义标签编辑状态
+    const [isEditingLabel, setIsEditingLabel] = useState(false);
+    const [labelInput, setLabelInput] = useState(account.custom_label || '');
+
+    const handleSaveLabel = () => {
+        if (onUpdateLabel) {
+            onUpdateLabel(labelInput.trim());
+        }
+        setIsEditingLabel(false);
+    };
+
+    const handleCancelLabel = () => {
+        setLabelInput(account.custom_label || '');
+        setIsEditingLabel(false);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            handleSaveLabel();
+        } else if (e.key === 'Escape') {
+            handleCancelLabel();
+        }
+    };
 
     // 使用统一的模型配置
 
@@ -378,6 +411,41 @@ function AccountRowContent({
                                 );
                             }
                         })()}
+                        {/* 自定义标签 */}
+                        {account.custom_label && !isEditingLabel && (
+                            <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 text-[10px] font-bold shadow-sm border border-orange-200/50 dark:border-orange-800/50">
+                                <Tag className="w-2.5 h-2.5" />
+                                {account.custom_label}
+                            </span>
+                        )}
+                        {/* 标签编辑输入框 */}
+                        {isEditingLabel && (
+                            <div className="flex items-center gap-1">
+                                <input
+                                    type="text"
+                                    className="px-1.5 py-0.5 text-[10px] w-20 border border-orange-300 dark:border-orange-700 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 bg-white dark:bg-base-200"
+                                    placeholder={t('accounts.custom_label_placeholder', 'Label')}
+                                    value={labelInput}
+                                    onChange={(e) => setLabelInput(e.target.value)}
+                                    onKeyDown={handleKeyDown}
+                                    autoFocus
+                                    maxLength={20}
+                                    onClick={(e) => e.stopPropagation()}
+                                />
+                                <button
+                                    className="p-0.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded transition-all"
+                                    onClick={(e) => { e.stopPropagation(); handleSaveLabel(); }}
+                                >
+                                    <Check className="w-3 h-3" />
+                                </button>
+                                <button
+                                    className="p-0.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-all"
+                                    onClick={(e) => { e.stopPropagation(); handleCancelLabel(); }}
+                                >
+                                    <X className="w-3 h-3" />
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             </td>
@@ -433,7 +501,7 @@ function AccountRowContent({
                     : "bg-white dark:bg-base-100",
                 !isCurrent && "group-hover:bg-gray-50 dark:group-hover:bg-base-200"
             )}>
-                <div className="flex flex-wrap items-center justify-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity max-w-[125px] mx-auto">
+                <div className="flex flex-wrap items-center justify-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity max-w-[180px] mx-auto">
                     <button
                         className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 rounded-lg transition-all"
                         onClick={(e) => { e.stopPropagation(); onViewDetails(); }}
@@ -448,6 +516,21 @@ function AccountRowContent({
                     >
                         <Fingerprint className="w-3.5 h-3.5" />
                     </button>
+                    {/* 自定义标签按钮 */}
+                    {onUpdateLabel && (
+                        <button
+                            className={cn(
+                                "p-1.5 rounded-lg transition-all",
+                                account.custom_label
+                                    ? "text-orange-500 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/30"
+                                    : "text-gray-500 dark:text-gray-400 hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/30"
+                            )}
+                            onClick={(e) => { e.stopPropagation(); setIsEditingLabel(true); }}
+                            title={t('accounts.edit_label', 'Edit Label')}
+                        >
+                            <Tag className="w-3.5 h-3.5" />
+                        </button>
+                    )}
                     <button
                         className={`p-1.5 text-gray-500 dark:text-gray-400 rounded-lg transition-all ${(isSwitching || isDisabled) ? 'bg-blue-50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400 cursor-not-allowed' : 'hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30'}`}
                         onClick={(e) => { e.stopPropagation(); onSwitch(); }}
@@ -534,6 +617,8 @@ function AccountTable({
     onDelete,
     onToggleProxy,
     onReorder,
+    onWarmup,
+    onUpdateLabel,
 }: AccountTableProps) {
     const { t } = useTranslation();
 
@@ -607,7 +692,7 @@ function AccountTable({
                                 {t('accounts.table.quota')}
                             </th>
                             <th className="px-2 py-1 text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[90px] whitespace-nowrap">{t('accounts.table.last_used')}</th>
-                            <th className="px-2 py-1 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap sticky right-0 w-[125px] bg-gray-50 dark:bg-base-200 z-20 shadow-[-12px_0_12px_-12px_rgba(0,0,0,0.1)] dark:shadow-[-12px_0_12px_-12px_rgba(255,255,255,0.05)] text-center">{t('accounts.table.actions')}</th>
+                            <th className="px-2 py-1 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap sticky right-0 w-[180px] bg-gray-50 dark:bg-base-200 z-20 shadow-[-12px_0_12px_-12px_rgba(0,0,0,0.1)] dark:shadow-[-12px_0_12px_-12px_rgba(255,255,255,0.05)] text-center">{t('accounts.table.actions')}</th>
                         </tr >
                     </thead >
                     <SortableContext items={accountIds} strategy={verticalListSortingStrategy}>
@@ -629,6 +714,8 @@ function AccountTable({
                                     onExport={() => onExport(account.id)}
                                     onDelete={() => onDelete(account.id)}
                                     onToggleProxy={() => onToggleProxy(account.id)}
+                                    onWarmup={onWarmup ? () => onWarmup(account.id) : undefined}
+                                    onUpdateLabel={onUpdateLabel ? (label: string) => onUpdateLabel(account.id, label) : undefined}
                                 />
                             ))}
                         </tbody>

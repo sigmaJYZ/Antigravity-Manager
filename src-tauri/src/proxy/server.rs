@@ -507,6 +507,10 @@ impl AxumServer {
             .route("/proxy/cli/sync", post(admin_execute_cli_sync))
             .route("/proxy/cli/restore", post(admin_execute_cli_restore))
             .route("/proxy/cli/config", post(admin_get_cli_config_content))
+            .route("/proxy/opencode/status", post(admin_get_opencode_sync_status))
+            .route("/proxy/opencode/sync", post(admin_execute_opencode_sync))
+            .route("/proxy/opencode/restore", post(admin_execute_opencode_restore))
+            .route("/proxy/opencode/config", post(admin_get_opencode_config_content))
             .route("/proxy/status", get(admin_get_proxy_status))
             .route("/proxy/pool/config", get(admin_get_proxy_pool_config))
             .route("/proxy/pool/bindings", get(admin_get_all_account_bindings))
@@ -600,7 +604,6 @@ impl AxumServer {
             .route("/accounts/warmup", post(admin_warm_up_all_accounts))
             .route("/accounts/:accountId/warmup", post(admin_warm_up_account))
             .route("/system/data-dir", get(admin_get_data_dir_path))
-            .route("/system/save-file", post(admin_save_text_file))
             .route("/system/updates/settings", get(admin_get_update_settings))
             .route(
                 "/system/updates/check-status",
@@ -620,6 +623,12 @@ impl AxumServer {
             )
             .route("/system/antigravity/path", get(admin_get_antigravity_path))
             .route("/system/antigravity/args", get(admin_get_antigravity_args))
+            .route("/system/cache/clear", post(admin_clear_antigravity_cache))
+            .route(
+                "/system/cache/paths",
+                get(admin_get_antigravity_cache_paths),
+            )
+            .route("/system/logs/clear-cache", post(admin_clear_log_cache))
             // Security / IP Monitoring
             .route("/security/logs", get(admin_get_ip_access_logs))
             .route("/security/logs/clear", post(admin_clear_ip_access_logs))
@@ -1818,6 +1827,40 @@ async fn admin_get_antigravity_args() -> Result<impl IntoResponse, (StatusCode, 
     Ok(Json(args))
 }
 
+async fn admin_clear_antigravity_cache(
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let res = crate::commands::clear_antigravity_cache().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+    Ok(Json(res))
+}
+
+async fn admin_get_antigravity_cache_paths(
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let res = crate::commands::get_antigravity_cache_paths()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: e }),
+            )
+        })?;
+    Ok(Json(res))
+}
+
+async fn admin_clear_log_cache() -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    crate::commands::clear_log_cache().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+    Ok(StatusCode::OK)
+}
+
 // Token Stats Handlers
 #[derive(Deserialize, Debug, Default)]
 #[serde(rename_all = "camelCase")]
@@ -2258,35 +2301,6 @@ async fn admin_warm_up_account(
     Ok(Json(result))
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SaveFileRequest {
-    path: String,
-    content: String,
-}
-
-async fn admin_save_text_file(
-    Json(payload): Json<SaveFileRequest>,
-) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    let res =
-        tokio::task::spawn_blocking(move || std::fs::write(&payload.path, &payload.content)).await;
-
-    match res {
-        Ok(Ok(_)) => Ok(StatusCode::OK),
-        Ok(Err(e)) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )),
-    }
-}
 
 async fn admin_save_http_api_settings(
     Json(payload): Json<crate::modules::http_api::HttpApiSettings>,
@@ -2476,8 +2490,9 @@ async fn admin_preview_generate_profile(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BindDeviceProfileWrapper {
+    #[serde(default)]
     account_id: String,
-    #[serde(flatten)]
+    #[serde(alias = "profile")]
     profile_wrapper: DeviceProfileApiWrapper,
 }
 
@@ -2637,6 +2652,16 @@ async fn admin_import_custom_db(
     State(state): State<AppState>,
     Json(payload): Json<CustomDbRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    // [SECURITY] 禁止目录遍历
+    if payload.path.contains("..") {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "非法路径: 不允许目录遍历".to_string(),
+            }),
+        ));
+    }
+
     let account = migration::import_from_custom_db_path(payload.path)
         .await
         .map_err(|e| {
@@ -3021,12 +3046,17 @@ fn get_oauth_redirect_uri(port: u16, _host: Option<&str>, _proto: Option<&str>) 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct IpAccessLogQuery {
+    #[serde(default = "default_page")]
     page: usize,
+    #[serde(default = "default_page_size")]
     page_size: usize,
     search: Option<String>,
     #[serde(default)]
     blocked_only: bool,
 }
+
+fn default_page() -> usize { 1 }
+fn default_page_size() -> usize { 50 }
 
 #[derive(Serialize)]
 struct IpAccessLogResponse {
@@ -3108,22 +3138,16 @@ struct AddBlacklistRequest {
     expires_at: Option<i64>,
 }
 
-#[derive(Deserialize)]
-struct AddBlacklistWrapper {
-    request: AddBlacklistRequest,
-}
-
 async fn admin_add_ip_to_blacklist(
-    Json(req_wrapper): Json<AddBlacklistWrapper>,
+    Json(req): Json<AddBlacklistRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    let req = req_wrapper.request;
     security_db::add_to_blacklist(
         &req.ip_pattern,
         req.reason.as_deref(),
         req.expires_at,
         "manual",
     ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
-    
+
     Ok(StatusCode::CREATED)
 }
 
@@ -3185,15 +3209,9 @@ struct AddWhitelistRequest {
     description: Option<String>,
 }
 
-#[derive(Deserialize)]
-struct AddWhitelistWrapper {
-    request: AddWhitelistRequest,
-}
-
 async fn admin_add_ip_to_whitelist(
-    Json(req_wrapper): Json<AddWhitelistWrapper>,
+    Json(req): Json<AddWhitelistRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    let req = req_wrapper.request;
     security_db::add_to_whitelist(
         &req.ip_pattern,
         req.description.as_deref(),
@@ -3296,4 +3314,85 @@ async fn admin_clear_debug_console_logs() -> impl IntoResponse {
     StatusCode::OK
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpencodeSyncStatusRequest {
+    proxy_url: String,
+}
 
+async fn admin_get_opencode_sync_status(
+    Json(payload): Json<OpencodeSyncStatusRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    crate::proxy::opencode_sync::get_opencode_sync_status(payload.proxy_url)
+        .await
+        .map(Json)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: e }),
+            )
+        })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpencodeSyncRequest {
+    proxy_url: String,
+    api_key: String,
+    #[serde(default)]
+    sync_accounts: bool,
+}
+
+async fn admin_execute_opencode_sync(
+    Json(payload): Json<OpencodeSyncRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    crate::proxy::opencode_sync::execute_opencode_sync(
+        payload.proxy_url,
+        payload.api_key,
+        Some(payload.sync_accounts),
+    )
+    .await
+    .map(|_| StatusCode::OK)
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })
+}
+
+async fn admin_execute_opencode_restore(
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    crate::proxy::opencode_sync::execute_opencode_restore()
+        .await
+        .map(|_| StatusCode::OK)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: e }),
+            )
+        })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetOpencodeConfigRequest {
+    file_name: Option<String>,
+}
+
+async fn admin_get_opencode_config_content(
+    Json(payload): Json<GetOpencodeConfigRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let file_name = payload.file_name;
+    tokio::task::spawn_blocking(move || crate::proxy::opencode_sync::read_opencode_config_content(file_name))
+        .await
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e.to_string() }),
+        ))?
+        .map(Json)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        ))
+}

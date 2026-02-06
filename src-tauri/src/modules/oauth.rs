@@ -148,7 +148,12 @@ pub async fn refresh_access_token(refresh_token: &str, account_id: Option<&str>)
         ("grant_type", "refresh_token"),
     ];
 
-    crate::modules::logger::log_info(&format!("Refreshing Token for account: {:?}...", account_id));
+    // [FIX #1583] 提供更详细的日志，帮助诊断 Docker 环境下的代理问题
+    if let Some(id) = account_id {
+        crate::modules::logger::log_info(&format!("Refreshing Token for account: {}...", id));
+    } else {
+        crate::modules::logger::log_info("Refreshing Token for generic request (no account_id)...");
+    }
     
     let response = client
         .post(TOKEN_URL)

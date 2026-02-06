@@ -144,6 +144,10 @@ export const ProxyMonitor: React.FC<ProxyMonitorProps> = ({ className }) => {
     const [stats, setStats] = useState<ProxyStats>({ total_requests: 0, success_count: 0, error_count: 0 });
     const [filter, setFilter] = useState('');
     const [accountFilter, setAccountFilter] = useState('');
+    // [FIX] 使用 ref 存储最新的筛选条件，避免 setInterval 闭包问题
+    const filterRef = useRef(filter);
+    const accountFilterRef = useRef(accountFilter);
+    const currentPageRef = useRef(1);
     const [selectedLog, setSelectedLog] = useState<ProxyRequestLog | null>(null);
     const [isLoggingEnabled, setIsLoggingEnabled] = useState(false);
     const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
@@ -250,6 +254,7 @@ export const ProxyMonitor: React.FC<ProxyMonitorProps> = ({ className }) => {
     const goToPage = (page: number) => {
         if (page >= 1 && page <= totalPages && page !== currentPage) {
             setCurrentPage(page);
+            currentPageRef.current = page; // [FIX] 同步 ref
             loadData(page, filter, accountFilter);
         }
     };
@@ -356,7 +361,8 @@ export const ProxyMonitor: React.FC<ProxyMonitorProps> = ({ className }) => {
             console.debug('[ProxyMonitor] Web mode detected, starting auto-poll (10s)');
             pollInterval = window.setInterval(() => {
                 if (isMountedRef.current && !loading) {
-                    loadData(currentPage, filter, accountFilter);
+                    // [FIX] 使用 ref.current 获取最新的筛选条件
+                    loadData(currentPageRef.current, filterRef.current, accountFilterRef.current);
                 }
             }, 10000);
         }
@@ -384,6 +390,10 @@ export const ProxyMonitor: React.FC<ProxyMonitorProps> = ({ className }) => {
     useEffect(() => {
         setCurrentPage(1);
         loadData(1, filter, accountFilter);
+        // [FIX] 同步 ref 值，供 setInterval 使用
+        filterRef.current = filter;
+        accountFilterRef.current = accountFilter;
+        currentPageRef.current = 1;
     }, [filter, accountFilter]);
 
     // Logs are already filtered and sorted by backend

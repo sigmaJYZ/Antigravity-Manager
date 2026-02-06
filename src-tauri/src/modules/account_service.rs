@@ -13,11 +13,14 @@ impl AccountService {
 
     /// 添加账号逻辑
     pub async fn add_account(&self, refresh_token: &str) -> Result<Account, String> {
-        // 1. 获取 Token (新账号，传 None 使用池策略)
-        let token_res = modules::oauth::refresh_access_token(refresh_token, None).await?;
+        // [FIX #1583] 生成临时 UUID 作为账号上下文，避免传递 None 导致代理选择异常
+        let temp_account_id = uuid::Uuid::new_v4().to_string();
+        
+        // 1. 获取 Token (使用临时 ID 确保代理选择有明确上下文)
+        let token_res = modules::oauth::refresh_access_token(refresh_token, Some(&temp_account_id)).await?;
 
         // 2. 获取用户信息
-        let user_info = modules::oauth::get_user_info(&token_res.access_token, None).await?;
+        let user_info = modules::oauth::get_user_info(&token_res.access_token, Some(&temp_account_id)).await?;
 
         // 3. 获取项目 ID (尝试)
         let project_id = crate::proxy::project_resolver::fetch_project_id(&token_res.access_token)
@@ -145,7 +148,10 @@ impl AccountService {
             .refresh_token
             .ok_or_else(|| "未获取到 Refresh Token。请撤销权限后重试。".to_string())?;
 
-        let user_info = modules::oauth::get_user_info(&token_res.access_token, None).await?;
+        // [FIX #1583] 生成临时 UUID 作为账号上下文
+        let temp_account_id = uuid::Uuid::new_v4().to_string();
+        
+        let user_info = modules::oauth::get_user_info(&token_res.access_token, Some(&temp_account_id)).await?;
         let project_id = crate::proxy::project_resolver::fetch_project_id(&token_res.access_token)
             .await
             .ok();

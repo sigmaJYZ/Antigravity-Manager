@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, Key, Globe } from 'lucide-react';
+import { Lock, Key, Globe, AlertCircle, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { isTauri } from '../../utils/env';
 
@@ -13,19 +13,34 @@ export const AdminAuthGuard: React.FC<{ children: React.ReactNode }> = ({ childr
     const [isAuthenticated, setIsAuthenticated] = useState(isTauri());
     const [apiKey, setApiKey] = useState('');
     const [showLangMenu, setShowLangMenu] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState('');
 
     useEffect(() => {
         if (isTauri()) return;
 
-        // 检查本地存储
+        // 检查 Session 存储 (优先)
+        const sessionKey = sessionStorage.getItem('abv_admin_api_key');
+        if (sessionKey) {
+            setIsAuthenticated(true);
+            setApiKey(sessionKey);
+            return;
+        }
+
+        // 检查本地存储 (迁移逻辑)
         const savedKey = localStorage.getItem('abv_admin_api_key');
         if (savedKey) {
+            // 迁移到 sessionStorage 并清理 localStorage
+            sessionStorage.setItem('abv_admin_api_key', savedKey);
+            localStorage.removeItem('abv_admin_api_key');
             setIsAuthenticated(true);
+            setApiKey(savedKey);
         }
 
         // 监听全局 401 事件
         const handleUnauthorized = () => {
-            localStorage.removeItem('abv_admin_api_key');
+            sessionStorage.removeItem('abv_admin_api_key');
+            localStorage.removeItem('abv_admin_api_key'); // 双重清理确保万一
             setIsAuthenticated(false);
         };
 
@@ -33,12 +48,48 @@ export const AdminAuthGuard: React.FC<{ children: React.ReactNode }> = ({ childr
         return () => window.removeEventListener('abv-unauthorized', handleUnauthorized);
     }, []);
 
-    const handleLogin = (e: React.FormEvent) => {
+    const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (apiKey.trim()) {
-            localStorage.setItem('abv_admin_api_key', apiKey.trim());
-            setIsAuthenticated(true);
-            window.location.reload();
+        const trimmedKey = apiKey.trim();
+        if (!trimmedKey) return;
+
+        setIsLoading(true);
+        setError('');
+
+        try {
+            // 先临时存储 key，用于验证请求
+            sessionStorage.setItem('abv_admin_api_key', trimmedKey);
+
+            // 调用一个需要认证的 API 来验证密码是否正确
+            const response = await fetch('/api/accounts', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${trimmedKey}`,
+                    'x-api-key': trimmedKey
+                }
+            });
+
+            if (response.ok || response.status === 204) {
+                // 验证成功
+                localStorage.removeItem('abv_admin_api_key');
+                setIsAuthenticated(true);
+                window.location.reload();
+            } else if (response.status === 401) {
+                // 密码错误
+                sessionStorage.removeItem('abv_admin_api_key');
+                setError(t('login.error_invalid_key'));
+            } else {
+                // 其他错误，但可能密码是对的
+                setIsAuthenticated(true);
+                window.location.reload();
+            }
+        } catch (err) {
+            // 网络错误等
+            sessionStorage.removeItem('abv_admin_api_key');
+            setError(t('login.error_network'));
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -110,17 +161,32 @@ export const AdminAuthGuard: React.FC<{ children: React.ReactNode }> = ({ childr
                             <input
                                 type="password"
                                 placeholder={t('login.placeholder')}
-                                className="w-full pl-12 pr-4 py-4 bg-slate-50 dark:bg-base-200 border-none rounded-2xl focus:ring-2 focus:ring-blue-500 transition-all outline-none text-slate-900 dark:text-white"
+                                className={`w-full pl-12 pr-4 py-4 bg-slate-50 dark:bg-base-200 border-2 rounded-2xl focus:ring-2 focus:ring-blue-500 transition-all outline-none text-slate-900 dark:text-white ${error ? 'border-red-400' : 'border-transparent'}`}
                                 value={apiKey}
-                                onChange={(e) => setApiKey(e.target.value)}
+                                onChange={(e) => { setApiKey(e.target.value); setError(''); }}
                                 autoFocus
+                                disabled={isLoading}
                             />
                         </div>
+                        {error && (
+                            <div className="flex items-center gap-2 text-red-500 text-sm">
+                                <AlertCircle className="w-4 h-4" />
+                                <span>{error}</span>
+                            </div>
+                        )}
                         <button
                             type="submit"
-                            className="w-full py-4 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-2xl shadow-lg shadow-blue-500/30 transition-all active:scale-[0.98]"
+                            disabled={isLoading || !apiKey.trim()}
+                            className="w-full py-4 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 disabled:cursor-not-allowed text-white font-bold rounded-2xl shadow-lg shadow-blue-500/30 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
                         >
-                            {t('login.btn_login')}
+                            {isLoading ? (
+                                <>
+                                    <Loader2 className="w-5 h-5 animate-spin" />
+                                    {t('login.btn_verifying')}
+                                </>
+                            ) : (
+                                t('login.btn_login')
+                            )}
                         </button>
                     </form>
 

@@ -13,6 +13,7 @@ export interface Account {
     proxy_disabled_reason?: string;
     proxy_disabled_at?: number;
     protected_models?: string[];
+    custom_label?: string;  // 用户自定义标签
     created_at: number;
     last_used: number;
 }

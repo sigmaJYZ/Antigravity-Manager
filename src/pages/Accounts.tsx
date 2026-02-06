@@ -1,5 +1,5 @@
-import { join } from "@tauri-apps/api/path";
-import { open, save } from "@tauri-apps/plugin-dialog";
+
+
 import {
   Download,
   LayoutGrid,
@@ -50,6 +50,7 @@ function Accounts() {
     reorderAccounts,
     warmUpAccounts,
     warmUpAccount,
+    updateAccountLabel,
   } = useAccountStore();
   const { config, showAllQuotas, toggleShowAllQuotas } = useConfigStore();
 
@@ -96,6 +97,15 @@ function Accounts() {
         next.delete(accountId);
         return next;
       });
+    }
+  };
+
+  const handleUpdateLabel = async (accountId: string, label: string) => {
+    try {
+      await updateAccountLabel(accountId, label);
+      showToast(t('accounts.label_updated', 'Label updated'), 'success');
+    } catch (error) {
+      showToast(`${t('common.error')}: ${error}`, 'error');
     }
   };
 
@@ -539,11 +549,14 @@ function Accounts() {
       // 2. Determine Path & Export
       if (isTauri()) {
         let path: string | null = null;
+        const { join } = await import("@tauri-apps/api/path");
+
         if (config?.default_export_path) {
           // Use default path
           path = await join(config.default_export_path, fileName);
         } else {
           // Use Native Dialog
+          const { save } = await import("@tauri-apps/plugin-dialog");
           path = await save({
             filters: [
               {
@@ -663,6 +676,7 @@ function Accounts() {
   const handleImportJson = async () => {
     if (isTauri()) {
       try {
+        const { open } = await import("@tauri-apps/plugin-dialog");
         const selected = await open({
           multiple: false,
           filters: [
@@ -1059,6 +1073,7 @@ function Accounts() {
                 }
                 onReorder={reorderAccounts}
                 onWarmup={handleWarmup}
+                onUpdateLabel={handleUpdateLabel}
               />
             </div>
           </div>
@@ -1084,6 +1099,7 @@ function Accounts() {
                 )
               }
               onWarmup={handleWarmup}
+              onUpdateLabel={handleUpdateLabel}
             />
           </div>
         )}

@@ -1,7 +1,8 @@
-import { Sun, Moon } from 'lucide-react';
+import { Sun, Moon, LogOut } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { LanguageDropdown, MoreDropdown } from './NavDropdowns';
 import { LANGUAGES } from './constants';
+import { isTauri } from '../../utils/env';
 
 interface NavSettingsProps {
     theme: 'light' | 'dark';
@@ -24,6 +25,12 @@ export function NavSettings({
     onLanguageChange
 }: NavSettingsProps) {
     const { t } = useTranslation();
+
+    const handleLogout = () => {
+        sessionStorage.removeItem('abv_admin_api_key');
+        localStorage.removeItem('abv_admin_api_key');
+        window.location.reload();
+    };
 
     return (
         <>
@@ -48,6 +55,17 @@ export function NavSettings({
                     languages={LANGUAGES}
                     onLanguageChange={onLanguageChange}
                 />
+
+                {/* 登出按钮 - 仅 Web 模式显示 */}
+                {!isTauri() && (
+                    <button
+                        onClick={handleLogout}
+                        className="w-10 h-10 rounded-full bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 flex items-center justify-center transition-colors"
+                        title={t('nav.logout', '登出')}
+                    >
+                        <LogOut className="w-5 h-5 text-red-600 dark:text-red-400" />
+                    </button>
+                )}
             </div>
 
             {/* 更多菜单 (< 480px) */}

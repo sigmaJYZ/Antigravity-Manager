@@ -88,14 +88,12 @@ const UserToken: React.FC = () => {
         setCreating(true);
         try {
             await invoke('create_user_token', {
-                request: {
-                    username: newUsername,
-                    expires_type: newExpiresType,
-                    description: newDesc || undefined,
-                    max_ips: newMaxIps,
-                    curfew_start: newCurfewStart || undefined,
-                    curfew_end: newCurfewEnd || undefined
-                }
+                username: newUsername,
+                expires_type: newExpiresType,
+                description: newDesc || undefined,
+                max_ips: newMaxIps,
+                curfew_start: newCurfewStart || undefined,
+                curfew_end: newCurfewEnd || undefined
             });
             showToast(t('common.create_success') || 'Created successfully', 'success');
             setShowCreateModal(false);
@@ -167,7 +165,7 @@ const UserToken: React.FC = () => {
 
     const handleRenew = async (id: string, type: string) => {
         try {
-            await invoke('renew_user_token', { id, expiresType: type });
+            await invoke('renew_user_token', { id, expires_type: type });
             showToast(t('user_token.renew_success') || 'Renewed successfully', 'success');
             loadData();
         } catch (e) {

@@ -54,6 +54,9 @@ pub struct Account {
     /// 代理绑定时间
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy_bound_at: Option<i64>,
+    /// 用户自定义标签
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_label: Option<String>,
 }
 
 impl Account {
@@ -81,6 +84,7 @@ impl Account {
             last_used: now,
             proxy_id: None,
             proxy_bound_at: None,
+            custom_label: None,
         }
     }
 

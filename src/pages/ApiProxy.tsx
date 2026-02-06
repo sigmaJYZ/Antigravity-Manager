@@ -2206,8 +2206,8 @@ print(response.text)`;
                                                 }
                                             }}
                                             className={`p-2 rounded-lg transition-all h-9 w-9 flex items-center justify-center border border-transparent ${selectedPreset.startsWith('custom_')
-                                                    ? 'text-gray-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 hover:border-red-100 dark:hover:border-red-900/30'
-                                                    : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                                                ? 'text-gray-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 hover:border-red-100 dark:hover:border-red-900/30'
+                                                : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
                                                 }`}
                                             title={selectedPreset.startsWith('custom_')
                                                 ? t('proxy.router.delete_preset')

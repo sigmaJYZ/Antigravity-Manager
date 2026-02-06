@@ -41,12 +41,10 @@ export const IpAccessLogs: React.FC<Props> = ({ refreshKey }) => {
         setLoading(true);
         try {
             const res = await invoke<IpAccessLogResponse>('get_ip_access_logs', {
-                query: {
-                    page,
-                    page_size: pageSize,
-                    search: search || null,
-                    blocked_only: blockedOnly,
-                }
+                page,
+                page_size: pageSize,
+                search: search || undefined,
+                blocked_only: blockedOnly,
             });
             setLogs(res.logs);
             setTotal(res.total);
