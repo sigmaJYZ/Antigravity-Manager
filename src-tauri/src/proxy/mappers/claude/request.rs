@@ -1823,16 +1823,6 @@ fn build_generation_config(
         }
         
         config["thinkingConfig"] = thinking_config;
-
-        // [NEW] 如果存在 effort，除了设置 thinkingLevel 外，也保留 effortLevel 以确保最大程度的协议兼容性
-        if let Some(e) = effort {
-            config["effortLevel"] = json!(match e.to_lowercase().as_str() {
-                "high" | "max" => "HIGH",
-                "medium" => "MEDIUM",
-                "low" => "LOW",
-                _ => "HIGH",
-            });
-        }
     }
 
     // 其他参数
